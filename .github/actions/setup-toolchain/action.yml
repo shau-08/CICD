@@ -24,6 +24,7 @@ runs:
       with:
         repository: morphingmachines/playground
         path: playground
+        fetch-depth: 1
 
     - name: Fix SSH URLs and fetch playground submodules (pinned, not always-latest)
       shell: bash
