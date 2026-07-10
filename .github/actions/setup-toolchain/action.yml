@@ -15,6 +15,10 @@ inputs:
     description: 'firtool version to install'
     required: false
     default: '1.62.1'
+  repo-path:
+    description: 'Path the caller repo was checked out to, relative to workspace root'
+    required: false
+    default: 'repo'
 
 runs:
   using: 'composite'
@@ -100,7 +104,7 @@ runs:
           done
         }
 
-        resolve_submodules "."
+        resolve_submodules "${{ inputs.repo-path }}"
 
     - name: Install Java
       uses: actions/setup-java@v4
@@ -126,8 +130,8 @@ runs:
         curl -L https://raw.githubusercontent.com/lefou/millw/main/millw > mill
         chmod +x mill
         sudo mv mill /usr/local/bin/mill
-        if [ ! -f .mill-version ]; then
-          echo "${{ inputs.mill-version }}" > .mill-version
+        if [ ! -f "${{ inputs.repo-path }}/.mill-version" ]; then
+          echo "${{ inputs.mill-version }}" > "${{ inputs.repo-path }}/.mill-version"
         fi
         if [ ! -f playground/.mill-version ]; then
           echo "${{ inputs.mill-version }}" > playground/.mill-version
