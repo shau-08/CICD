@@ -1,0 +1,46 @@
+name: Reusable CI Logic
+on:
+  workflow_call:
+    secrets:
+      CI_SSH_PRIVATE_KEY:
+        required: false
+
+jobs:
+  ci:
+    # Excluded from workflow_dispatch so a manual CD run on this same repo
+    # doesn't also trigger CI on the caller side.
+    if: github.event_name != 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout caller repo
+        uses: actions/checkout@v4
+        with:
+          submodules: false # dependencies/ resolution is handled by setup-toolchain
+
+      - name: Cache Mill compiled output
+        uses: actions/cache@v4
+        with:
+          path: out
+          key: mill-out-${{ runner.os }}-${{ github.event.repository.name }}-${{ hashFiles('dependencies/**/*.scala', 'build.sc') }}
+          restore-keys: |
+            mill-out-${{ runner.os }}-${{ github.event.repository.name }}-
+
+      # Replace ORG/Chisel-RTL with wherever this composite action actually lives.
+      - name: Setup toolchain and resolve dependencies
+        uses: ORG/Chisel-RTL/.github/actions/setup-toolchain@main
+
+      - name: Run tests
+        env:
+          JAVA_OPTS: "-Xmx4g -Xss8m"
+        run: make test
+
+      # `lint` is not a universal target (confirmed present only in cr_ni,
+      # absent in mmu, rrm, and playground/Makefile.include as of this
+      # writing). Probe first so repos without it don't hard-fail CI.
+      - name: Lint (if this repo has a lint target)
+        run: |
+          if make -n lint >/dev/null 2>&1; then
+            make lint
+          else
+            echo "No 'lint' target in this repo's Makefile — skipping."
+          fi
