@@ -26,7 +26,15 @@ runs:
         path: playground
         fetch-depth: 1
 
+    - name: Cache playground submodules
+      id: playground-cache
+      uses: actions/cache@v4
+      with:
+        path: playground/dependencies
+        key: playground-deps-${{ hashFiles('playground/.gitmodules') }}
+
     - name: Fix SSH URLs and fetch playground submodules (pinned, not always-latest)
+      if: steps.playground-cache.outputs.cache-hit != 'true'
       shell: bash
       working-directory: playground
       run: |
@@ -36,37 +44,53 @@ runs:
         git submodule sync --recursive
         git submodule update --init --recursive --depth=1
 
-    - name: Resolve this repo's dependencies/* to latest default-branch HEAD
+    - name: Resolve this repo's dependency tree to latest default-branch HEAD (recursive)
       shell: bash
       run: |
         set -euo pipefail
-        if [ ! -f .gitmodules ]; then
-          echo "No .gitmodules in this repo — nothing to resolve."
-          exit 0
-        fi
         git config --global url."https://github.com/".insteadOf "git@github.com:"
-        git submodule sync --recursive
-        git submodule update --init --depth=1 -- dependencies
 
-        for path in $(git config -f .gitmodules --get-regexp '\.path$' | awk '{print $2}'); do
-          case "$path" in
-            dependencies/*)
-              echo "::group::Resolving $path"
-              git -C "$path" fetch --depth=1 origin
-              default_branch=$(git -C "$path" remote show origin | awk '/HEAD branch/ {print $NF}')
-              if [ -z "$default_branch" ]; then
-                echo "Could not determine default branch for $path" >&2
-                exit 1
-              fi
-              echo "Forcing $path to origin/${default_branch} (ignoring any branch= pin in .gitmodules)"
-              git -C "$path" checkout -f "origin/${default_branch}"
-              echo "::endgroup::"
-              ;;
-            *)
-              echo "Skipping $path (outside dependencies/)"
-              ;;
-          esac
-        done
+        # TODO: private submodules (e.g. redefine-header) need a credential
+        # wired in here before this fetch will succeed against them —
+        # either an SSH deploy key (webfactory/ssh-agent, fed from
+        # inputs.deploy-key) or an HTTPS PAT via url.insteadOf rewrite.
+        # Nothing is configured yet; add before relying on this for
+        # private dependencies.
+
+        resolve_submodules() {
+          local root="$1"
+          if [ ! -f "$root/.gitmodules" ]; then
+            return 0
+          fi
+
+          git -C "$root" submodule sync --recursive
+          git -C "$root" submodule update --init --depth=1
+
+          for path in $(git config -f "$root/.gitmodules" --get-regexp '\.path$' | awk '{print $2}'); do
+            full="$root/$path"
+            echo "::group::Resolving $full"
+            if ! git -C "$full" fetch --depth=1 origin; then
+              echo "Failed to fetch $full — likely missing auth for a private repo (see TODO above)." >&2
+              exit 1
+            fi
+            default_branch=$(git -C "$full" remote show origin | awk '/HEAD branch/ {print $NF}')
+            if [ -z "$default_branch" ]; then
+              echo "Could not determine default branch for $full" >&2
+              exit 1
+            fi
+            echo "Forcing $full to origin/${default_branch} (ignoring any branch= pin in .gitmodules)"
+            git -C "$full" checkout -f "origin/${default_branch}"
+            echo "::endgroup::"
+
+            # Recurse into whatever this submodule itself depends on —
+            # the tree goes to different depths per repo (e.g. mmu ->
+            # emitrtl -> emitrtl's own deps, vs. mmu -> redefine-header,
+            # a leaf with no further .gitmodules).
+            resolve_submodules "$full"
+          done
+        }
+
+        resolve_submodules "."
 
     - name: Install Java
       uses: actions/setup-java@v4
