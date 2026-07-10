@@ -1,0 +1,89 @@
+name: Reusable CD Logic
+on:
+  workflow_call:
+    inputs:
+      tag_name:
+        description: 'Release tag to use. Leave empty to auto-generate <repo>-<branch>-<date>-<sha>.'
+        required: false
+        type: string
+      build_output_path:
+        description: 'Directory containing generated RTL to package'
+        required: false
+        type: string
+        default: generated_sv_dir
+    secrets:
+      CI_SSH_PRIVATE_KEY:
+        required: false
+      RELEASE_TOKEN:
+        required: false
+
+jobs:
+  cd:
+    # Only ever runs from a manual dispatch on the caller.
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    environment: production
+    concurrency: rtl-release-${{ github.event.repository.name }}
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout caller repo
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+          ref: ${{ github.ref_name }}
+
+      - name: Cache Mill compiled output
+        uses: actions/cache@v4
+        with:
+          path: out
+          key: mill-out-${{ runner.os }}-${{ github.event.repository.name }}-${{ hashFiles('dependencies/**/*.scala', 'build.sc') }}
+          restore-keys: |
+            mill-out-${{ runner.os }}-${{ github.event.repository.name }}-
+
+      # Replace ORG/Chisel-RTL with wherever this composite action actually lives.
+      - name: Setup toolchain and resolve dependencies
+        uses: ORG/Chisel-RTL/.github/actions/setup-toolchain@main
+
+      - name: Generate RTL
+        env:
+          JAVA_OPTS: "-Xmx4g -Xss8m"
+        run: make rtl
+
+      - name: Resolve tag name
+        id: tag
+        run: |
+          set -euo pipefail
+          if [ -n "${{ inputs.tag_name }}" ]; then
+            echo "tag=${{ inputs.tag_name }}" >> "$GITHUB_OUTPUT"
+          else
+            tag="${{ github.event.repository.name }}-${{ github.ref_name }}-$(date +%Y%m%d)-${GITHUB_SHA::7}"
+            echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Package RTL
+        run: |
+          set -euo pipefail
+          out="${{ inputs.build_output_path }}"
+          if [ ! -d "$out" ] || [ -z "$(find "$out" -name '*.sv' -print -quit)" ]; then
+            echo "No .sv files were generated in $out — aborting release."
+            exit 1
+          fi
+          tar -czvf "generated-rtl-${{ steps.tag.outputs.tag }}.tar.gz" "$out/"
+
+      # softprops/action-gh-release upserts by default: if this tag already
+      # has a release (e.g. same-commit same-day re-run), it updates it
+      # instead of failing, which is what handles the tag-collision case.
+      - name: Create or update Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: RTL Release ${{ steps.tag.outputs.tag }}
+          files: generated-rtl-*.tar.gz
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+        env:
+          # Falls back to GITHUB_TOKEN for releases within the same repo.
+          # Swap in a real org PAT (RELEASE_TOKEN) if any repo needs to
+          # publish to a different/central repo.
+          GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
