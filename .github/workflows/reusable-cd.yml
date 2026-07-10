@@ -27,25 +27,33 @@ jobs:
     permissions:
       contents: write
     steps:
+      # Checked out into repo/ (not workspace root) so it sits as a true
+      # sibling of playground/ — several Makefiles (mmu, rrm, ...) hardcode
+      # MILL = ./../playground/mill, which only resolves correctly if the
+      # calling repo is one level below the workspace, next to playground/.
       - name: Checkout caller repo
         uses: actions/checkout@v4
         with:
+          path: repo
           submodules: false
           ref: ${{ github.ref_name }}
 
       - name: Cache Mill compiled output
         uses: actions/cache@v4
         with:
-          path: out
-          key: mill-out-${{ runner.os }}-${{ github.event.repository.name }}-${{ hashFiles('dependencies/**/*.scala', 'build.sc') }}
+          path: repo/out
+          key: mill-out-${{ runner.os }}-${{ github.event.repository.name }}-${{ hashFiles('repo/dependencies/**/*.scala', 'repo/build.sc') }}
           restore-keys: |
             mill-out-${{ runner.os }}-${{ github.event.repository.name }}-
 
       # Replace ORG/Chisel-RTL with wherever this composite action actually lives.
       - name: Setup toolchain and resolve dependencies
         uses: shau-08/CICD/.github/actions/setup-toolchain@main
+        with:
+          repo-path: repo
 
       - name: Generate RTL
+        working-directory: repo
         env:
           JAVA_OPTS: "-Xmx4g -Xss8m"
         run: make rtl
@@ -62,6 +70,7 @@ jobs:
           fi
 
       - name: Package RTL
+        working-directory: repo
         run: |
           set -euo pipefail
           out="${{ inputs.build_output_path }}"
@@ -69,7 +78,7 @@ jobs:
             echo "No .sv files were generated in $out — aborting release."
             exit 1
           fi
-          tar -czvf "generated-rtl-${{ steps.tag.outputs.tag }}.tar.gz" "$out/"
+          tar -czvf "../generated-rtl-${{ steps.tag.outputs.tag }}.tar.gz" "$out/"
 
       # softprops/action-gh-release upserts by default: if this tag already
       # has a release (e.g. same-commit same-day re-run), it updates it
