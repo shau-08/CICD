@@ -15,6 +15,10 @@ inputs:
     description: 'firtool version to install'
     required: false
     default: '1.62.1'
+  verilator-version:
+    description: 'verilator git tag to build and install (must match what playground/Makefile.include checks for)'
+    required: false
+    default: 'v5.012'
   repo-path:
     description: 'Path the caller repo was checked out to, relative to workspace root'
     required: false
@@ -155,33 +159,35 @@ runs:
         fi
         firtool --version
 
-    - name: Install verilator
+    - name: Cache verilator build
+      id: verilator-cache
+      uses: actions/cache@v4
+      with:
+        path: |
+          /usr/local/bin/verilator*
+          /usr/local/share/verilator
+        key: verilator-${{ inputs.verilator-version }}
+
+    - name: Build and install verilator
+      # apt's verilator is whatever Ubuntu's repo currently ships, which
+      # does NOT match the exact version playground/Makefile.include's
+      # check-verilator enforces (Verilator 5.012 2023-06-13 rev v5.012).
+      # Build the pinned tag from source instead, same pin-and-cache
+      # pattern as firtool above.
       shell: bash
       run: |
         set -euo pipefail
-        if ! command -v verilator &> /dev/null; then
-          sudo apt-get update -y
-          sudo apt-get install -y verilator
+        if command -v verilator &> /dev/null && verilator --version | grep -q "${{ inputs.verilator-version }}"; then
+          verilator --version
+          exit 0
         fi
+        sudo apt-get update -y
+        sudo apt-get install -y git help2man perl python3 make autoconf g++ flex bison \
+          ccache libgoogle-perftools-dev numactl perl-doc libfl2 libfl-dev zlib1g zlib1g-dev
+        git clone --depth=1 --branch "${{ inputs.verilator-version }}" https://github.com/verilator/verilator.git /tmp/verilator-src
+        cd /tmp/verilator-src
+        autoconf
+        ./configure
+        make -j"$(nproc)"
+        sudo make install
         verilator --version
-
-    # NOTE: apt's verilator version is whatever Ubuntu's package repo
-    # currently ships (not pinned like firtool). If any repo's tests need
-    # a specific verilator version, this needs to switch to a build-from-
-    # source or a pinned-binary install instead — flag if that's the case.
-
-    - name: Provide check-verilator shim
-      # Several repos' Makefiles (mmu, cr_ni, rrm) declare `test:
-      # check-verilator` as a prerequisite, but no check-verilator target
-      # is defined anywhere reachable — not locally, not in
-      # playground/Makefile.include. We don't have write access to
-      # playground and aren't editing these repos' own Makefiles, so this
-      # provides the missing target via GNU Make's MAKEFILES env var,
-      # which gets loaded automatically before any Makefile in later
-      # steps — no change needed to how `make test`/`make rtl` are
-      # invoked anywhere else in the workflow.
-      shell: bash
-      run: |
-        set -euo pipefail
-        printf '.PHONY: check-verilator\ncheck-verilator:\n\t@command -v verilator >/dev/null 2>&1 || (echo "verilator not found on PATH" >&2 \&\& exit 1)\n' > /tmp/ci-shim.mk
-        echo "MAKEFILES=/tmp/ci-shim.mk" >> "$GITHUB_ENV"
