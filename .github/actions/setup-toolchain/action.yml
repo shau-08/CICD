@@ -1,0 +1,122 @@
+name: 'Setup Chisel RTL Toolchain'
+description: >
+  Shared setup used by both CI and CD. Checks out the pinned `playground`
+  toolchain repo, installs Java/Mill/firtool, and resolves the calling
+  repo's own dependencies/* submodules to the latest commit on each
+  submodule's real remote default branch — ignoring any branch= override
+  baked into .gitmodules, since that goes stale.
+
+inputs:
+  mill-version:
+    description: 'Mill version to fall back to if no .mill-version file is present'
+    required: false
+    default: '0.11.6'
+  firtool-version:
+    description: 'firtool version to install'
+    required: false
+    default: '1.62.1'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Checkout playground (pinned shared toolchain)
+      uses: actions/checkout@v4
+      with:
+        repository: morphingmachines/playground
+        path: playground
+
+    - name: Fix SSH URLs and fetch playground submodules (pinned, not always-latest)
+      shell: bash
+      working-directory: playground
+      run: |
+        set -euo pipefail
+        git config --global url."https://github.com/".insteadOf "git@github.com:"
+        sed -i 's|git@github.com:|https://github.com/|g' .gitmodules
+        git submodule sync --recursive
+        git submodule update --init --recursive --depth=1
+
+    - name: Resolve this repo's dependencies/* to latest default-branch HEAD
+      shell: bash
+      run: |
+        set -euo pipefail
+        if [ ! -f .gitmodules ]; then
+          echo "No .gitmodules in this repo — nothing to resolve."
+          exit 0
+        fi
+        git config --global url."https://github.com/".insteadOf "git@github.com:"
+        git submodule sync --recursive
+        git submodule update --init --depth=1 -- dependencies
+
+        for path in $(git config -f .gitmodules --get-regexp '\.path$' | awk '{print $2}'); do
+          case "$path" in
+            dependencies/*)
+              echo "::group::Resolving $path"
+              git -C "$path" fetch --depth=1 origin
+              default_branch=$(git -C "$path" remote show origin | awk '/HEAD branch/ {print $NF}')
+              if [ -z "$default_branch" ]; then
+                echo "Could not determine default branch for $path" >&2
+                exit 1
+              fi
+              echo "Forcing $path to origin/${default_branch} (ignoring any branch= pin in .gitmodules)"
+              git -C "$path" checkout -f "origin/${default_branch}"
+              echo "::endgroup::"
+              ;;
+            *)
+              echo "Skipping $path (outside dependencies/)"
+              ;;
+          esac
+        done
+
+    - name: Install Java
+      uses: actions/setup-java@v4
+      with:
+        distribution: temurin
+        java-version: '17'
+
+    - name: Cache Mill dependencies
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cache/mill
+          ~/.ivy2/cache
+          ~/.cache/coursier
+        key: ${{ runner.os }}-mill-${{ hashFiles('build.sc') }}
+        restore-keys: |
+          ${{ runner.os }}-mill-
+
+    - name: Install Mill
+      shell: bash
+      run: |
+        set -euo pipefail
+        curl -L https://raw.githubusercontent.com/lefou/millw/main/millw > mill
+        chmod +x mill
+        sudo mv mill /usr/local/bin/mill
+        if [ ! -f .mill-version ]; then
+          echo "${{ inputs.mill-version }}" > .mill-version
+        fi
+        if [ ! -f playground/.mill-version ]; then
+          echo "${{ inputs.mill-version }}" > playground/.mill-version
+        fi
+
+    - name: Cache firtool
+      uses: actions/cache@v4
+      with:
+        path: /usr/local/bin/firtool
+        key: firtool-${{ inputs.firtool-version }}
+
+    - name: Install firtool
+      shell: bash
+      run: |
+        set -euo pipefail
+        if ! command -v firtool &> /dev/null; then
+          wget -q https://github.com/llvm/circt/releases/download/firtool-${{ inputs.firtool-version }}/firrtl-bin-linux-x64.tar.gz
+          tar -xzf firrtl-bin-linux-x64.tar.gz
+          sudo mv firtool-${{ inputs.firtool-version }}/bin/firtool /usr/local/bin/firtool
+          sudo chmod +x /usr/local/bin/firtool
+        fi
+        firtool --version
+
+    # NOTE: `test` depends on check-verilator in some Makefiles (cr_ni) and
+    # check-firtool in others (mmu). Verilator install is NOT included here —
+    # this was an open question in our discussion (is it preinstalled on
+    # your runners?). Add an install step here if not.
