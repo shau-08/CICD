@@ -37,15 +37,22 @@ runs:
       if: steps.playground-cache.outputs.cache-hit != 'true'
       shell: bash
       working-directory: playground
+      env:
+        GIT_TERMINAL_PROMPT: "0"
       run: |
         set -euo pipefail
         git config --global url."https://github.com/".insteadOf "git@github.com:"
         sed -i 's|git@github.com:|https://github.com/|g' .gitmodules
         git submodule sync --recursive
-        git submodule update --init --recursive --depth=1
+        # Not --recursive: only fetch playground's direct submodules (e.g.
+        # chipyard itself), not chipyard's own huge nested submodule tree,
+        # which the Makefiles here don't actually touch.
+        git submodule update --init --depth=1
 
     - name: Resolve this repo's dependency tree to latest default-branch HEAD (recursive)
       shell: bash
+      env:
+        GIT_TERMINAL_PROMPT: "0"
       run: |
         set -euo pipefail
         git config --global url."https://github.com/".insteadOf "git@github.com:"
@@ -54,8 +61,9 @@ runs:
         # wired in here before this fetch will succeed against them —
         # either an SSH deploy key (webfactory/ssh-agent, fed from
         # inputs.deploy-key) or an HTTPS PAT via url.insteadOf rewrite.
-        # Nothing is configured yet; add before relying on this for
-        # private dependencies.
+        # GIT_TERMINAL_PROMPT=0 above means an unauthenticated fetch now
+        # fails fast instead of hanging, but it still needs real auth
+        # wired in to actually succeed against private repos.
 
         resolve_submodules() {
           local root="$1"
@@ -73,7 +81,9 @@ runs:
               echo "Failed to fetch $full — likely missing auth for a private repo (see TODO above)." >&2
               exit 1
             fi
-            default_branch=$(git -C "$full" remote show origin | awk '/HEAD branch/ {print $NF}')
+            # ls-remote --symref is a single lightweight query, unlike
+            # `git remote show origin` which does a full, slow handshake.
+            default_branch=$(git -C "$full" ls-remote --symref origin HEAD | awk '/^ref:/ {sub("refs/heads/", "", $2); print $2}')
             if [ -z "$default_branch" ]; then
               echo "Could not determine default branch for $full" >&2
               exit 1
