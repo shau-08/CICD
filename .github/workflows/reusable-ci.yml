@@ -12,24 +12,32 @@ jobs:
     if: github.event_name != 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
+      # Checked out into repo/ (not workspace root) so it sits as a true
+      # sibling of playground/ — several Makefiles (mmu, rrm, ...) hardcode
+      # MILL = ./../playground/mill, which only resolves correctly if the
+      # calling repo is one level below the workspace, next to playground/.
       - name: Checkout caller repo
         uses: actions/checkout@v4
         with:
+          path: repo
           submodules: false # dependencies/ resolution is handled by setup-toolchain
 
       - name: Cache Mill compiled output
         uses: actions/cache@v4
         with:
-          path: out
-          key: mill-out-${{ runner.os }}-${{ github.event.repository.name }}-${{ hashFiles('dependencies/**/*.scala', 'build.sc') }}
+          path: repo/out
+          key: mill-out-${{ runner.os }}-${{ github.event.repository.name }}-${{ hashFiles('repo/dependencies/**/*.scala', 'repo/build.sc') }}
           restore-keys: |
             mill-out-${{ runner.os }}-${{ github.event.repository.name }}-
 
       # Replace ORG/Chisel-RTL with wherever this composite action actually lives.
       - name: Setup toolchain and resolve dependencies
         uses: shau-08/CICD/.github/actions/setup-toolchain@main
+        with:
+          repo-path: repo
 
       - name: Run tests
+        working-directory: repo
         env:
           JAVA_OPTS: "-Xmx4g -Xss8m"
         run: make test
@@ -38,6 +46,7 @@ jobs:
       # absent in mmu, rrm, and playground/Makefile.include as of this
       # writing). Probe first so repos without it don't hard-fail CI.
       - name: Lint (if this repo has a lint target)
+        working-directory: repo
         run: |
           if make -n lint >/dev/null 2>&1; then
             make lint
