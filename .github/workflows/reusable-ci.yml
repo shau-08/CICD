@@ -27,7 +27,7 @@ jobs:
 
       # Replace ORG/Chisel-RTL with wherever this composite action actually lives.
       - name: Setup toolchain and resolve dependencies
-        uses: ORG/Chisel-RTL/.github/actions/setup-toolchain@main
+        uses: shau-08/CICD/.github/actions/setup-toolchain@main
 
       - name: Run tests
         env:
