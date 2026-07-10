@@ -151,7 +151,17 @@ runs:
         fi
         firtool --version
 
-    # NOTE: `test` depends on check-verilator in some Makefiles (cr_ni) and
-    # check-firtool in others (mmu). Verilator install is NOT included here —
-    # this was an open question in our discussion (is it preinstalled on
-    # your runners?). Add an install step here if not.
+    - name: Install verilator
+      shell: bash
+      run: |
+        set -euo pipefail
+        if ! command -v verilator &> /dev/null; then
+          sudo apt-get update -y
+          sudo apt-get install -y verilator
+        fi
+        verilator --version
+
+    # NOTE: apt's verilator version is whatever Ubuntu's package repo
+    # currently ships (not pinned like firtool). If any repo's tests need
+    # a specific verilator version, this needs to switch to a build-from-
+    # source or a pinned-binary install instead — flag if that's the case.
