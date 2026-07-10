@@ -165,3 +165,19 @@ runs:
     # currently ships (not pinned like firtool). If any repo's tests need
     # a specific verilator version, this needs to switch to a build-from-
     # source or a pinned-binary install instead — flag if that's the case.
+
+    - name: Provide check-verilator shim
+      # Several repos' Makefiles (mmu, cr_ni, rrm) declare `test:
+      # check-verilator` as a prerequisite, but no check-verilator target
+      # is defined anywhere reachable — not locally, not in
+      # playground/Makefile.include. We don't have write access to
+      # playground and aren't editing these repos' own Makefiles, so this
+      # provides the missing target via GNU Make's MAKEFILES env var,
+      # which gets loaded automatically before any Makefile in later
+      # steps — no change needed to how `make test`/`make rtl` are
+      # invoked anywhere else in the workflow.
+      shell: bash
+      run: |
+        set -euo pipefail
+        printf '.PHONY: check-verilator\ncheck-verilator:\n\t@command -v verilator >/dev/null 2>&1 || (echo "verilator not found on PATH" >&2 \&\& exit 1)\n' > /tmp/ci-shim.mk
+        echo "MAKEFILES=/tmp/ci-shim.mk" >> "$GITHUB_ENV"
