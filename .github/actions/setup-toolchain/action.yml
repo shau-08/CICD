@@ -110,6 +110,18 @@ runs:
 
         resolve_submodules "${{ inputs.repo-path }}"
 
+    - name: Debug - show resolved dependency tree
+      shell: bash
+      run: |
+        echo "--- ${{ inputs.repo-path }}/dependencies ---"
+        find "${{ inputs.repo-path }}/dependencies" -maxdepth 3 2>/dev/null || echo "(no dependencies dir)"
+        echo "--- contents check ---"
+        for d in "${{ inputs.repo-path }}"/dependencies/*/; do
+          name=$(basename "$d")
+          count=$(find "$d" -type f 2>/dev/null | wc -l)
+          echo "$name: $count files"
+        done
+
     - name: Install Java
       uses: actions/setup-java@v4
       with:
