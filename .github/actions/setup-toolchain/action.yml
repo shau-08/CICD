@@ -1,10 +1,13 @@
 name: 'Setup Chisel RTL Toolchain'
 description: >
-  Shared setup used by both CI and CD. Checks out the pinned `playground`
-  toolchain repo, installs Java/Mill/firtool, and resolves the calling
-  repo's own dependencies/* submodules to the latest commit on each
-  submodule's real remote default branch — ignoring any branch= override
-  baked into .gitmodules, since that goes stale.
+  Shared setup used by both CI and CD. Checks out the `playground`
+  toolchain repo and resolves BOTH playground's own direct dependencies
+  and the calling repo's own direct dependencies/* entries to the latest
+  commit on each submodule's real remote default branch -- single level
+  only (not recursive into nested .gitmodules), fetched shallow
+  (--depth 1). Confirmed directly with the repo owner: both playground's
+  and the project's own dependencies should always resolve to latest, not
+  whatever's pinned, one level deep.
 
 inputs:
   mill-version:
@@ -15,112 +18,53 @@ inputs:
     description: 'firtool version to install'
     required: false
     default: '1.62.1'
-  verilator-version:
-    description: 'verilator git tag to build and install (must match what playground/Makefile.include checks for)'
+  ssh-private-key:
+    description: >
+      SSH deploy key with read access to private dependency repos (e.g.
+      redefine-header). Composite actions can't read the secrets context
+      directly, so the caller workflow must pass secrets.CI_SSH_PRIVATE_KEY
+      into this input explicitly.
     required: false
-    default: 'v5.012'
-  repo-path:
-    description: 'Path the caller repo was checked out to, relative to workspace root'
-    required: false
-    default: 'repo'
+    default: ''
 
 runs:
   using: 'composite'
   steps:
-    - name: Checkout playground (pinned shared toolchain)
+    # Must run before ANY step that clones/fetches a private repo --
+    # playground itself may be private, and dependencies/* almost
+    # certainly includes private repos (confirmed: redefine-header is).
+    - name: Configure SSH access for private repos
+      if: inputs.ssh-private-key != ''
+      uses: webfactory/ssh-agent@v0.9.0
+      with:
+        ssh-private-key: ${{ inputs.ssh-private-key }}
+
+    - name: Checkout playground (shared toolchain)
       uses: actions/checkout@v4
       with:
         repository: morphingmachines/playground
         path: playground
         fetch-depth: 1
+        ssh-key: ${{ inputs.ssh-private-key }}
 
-    - name: Cache playground submodules
-      id: playground-cache
-      uses: actions/cache@v4
-      with:
-        path: playground/dependencies
-        key: playground-deps-${{ hashFiles('playground/.gitmodules') }}
-
-    - name: Fix SSH URLs and fetch playground submodules (pinned, not always-latest)
-      if: steps.playground-cache.outputs.cache-hit != 'true'
+    # Single level only, per direction confirmed with the repo owner: NOT
+    # recursive into nested .gitmodules. Both playground's own direct
+    # dependencies and this repo's own direct dependencies/ entries get
+    # updated to the latest commit on their tracked branch (--remote,
+    # ignoring whatever SHA is pinned in the parent's tree), fetched
+    # shallow (--depth 1). Works for whatever a given repo declares in
+    # its own .gitmodules -- nothing here is hardcoded to specific names.
+    # Deliberately does NOT rewrite SSH URLs to HTTPS -- that broke
+    # private-repo access entirely; the ssh-agent step above handles auth
+    # for both public and private submodules uniformly.
+    - name: Update playground's submodules (latest commit, depth 1, non-recursive)
       shell: bash
       working-directory: playground
-      env:
-        GIT_TERMINAL_PROMPT: "0"
-      run: |
-        set -euo pipefail
-        git config --global url."https://github.com/".insteadOf "git@github.com:"
-        sed -i 's|git@github.com:|https://github.com/|g' .gitmodules
-        git submodule sync --recursive
-        # Not --recursive: only fetch playground's direct submodules (e.g.
-        # chipyard itself), not chipyard's own huge nested submodule tree,
-        # which the Makefiles here don't actually touch.
-        git submodule update --init --depth=1
+      run: git submodule update --init --remote --depth 1
 
-    - name: Resolve this repo's dependency tree to latest default-branch HEAD (recursive)
+    - name: Update this repo's submodules (latest commit, depth 1, non-recursive)
       shell: bash
-      env:
-        GIT_TERMINAL_PROMPT: "0"
-      run: |
-        set -euo pipefail
-        git config --global url."https://github.com/".insteadOf "git@github.com:"
-
-        # TODO: private submodules (e.g. redefine-header) need a credential
-        # wired in here before this fetch will succeed against them —
-        # either an SSH deploy key (webfactory/ssh-agent, fed from
-        # inputs.deploy-key) or an HTTPS PAT via url.insteadOf rewrite.
-        # GIT_TERMINAL_PROMPT=0 above means an unauthenticated fetch now
-        # fails fast instead of hanging, but it still needs real auth
-        # wired in to actually succeed against private repos.
-
-        resolve_submodules() {
-          local root="$1"
-          if [ ! -f "$root/.gitmodules" ]; then
-            return 0
-          fi
-
-          git -C "$root" submodule sync --recursive
-          git -C "$root" submodule update --init --depth=1
-
-          for path in $(git config -f "$root/.gitmodules" --get-regexp '\.path$' | awk '{print $2}'); do
-            full="$root/$path"
-            echo "::group::Resolving $full"
-            if ! git -C "$full" fetch --depth=1 origin; then
-              echo "Failed to fetch $full — likely missing auth for a private repo (see TODO above)." >&2
-              exit 1
-            fi
-            # ls-remote --symref is a single lightweight query, unlike
-            # `git remote show origin` which does a full, slow handshake.
-            default_branch=$(git -C "$full" ls-remote --symref origin HEAD | awk '/^ref:/ {sub("refs/heads/", "", $2); print $2}')
-            if [ -z "$default_branch" ]; then
-              echo "Could not determine default branch for $full" >&2
-              exit 1
-            fi
-            echo "Forcing $full to origin/${default_branch} (ignoring any branch= pin in .gitmodules)"
-            git -C "$full" checkout -f "origin/${default_branch}"
-            echo "::endgroup::"
-
-            # Recurse into whatever this submodule itself depends on —
-            # the tree goes to different depths per repo (e.g. mmu ->
-            # emitrtl -> emitrtl's own deps, vs. mmu -> redefine-header,
-            # a leaf with no further .gitmodules).
-            resolve_submodules "$full"
-          done
-        }
-
-        resolve_submodules "${{ inputs.repo-path }}"
-
-    - name: Debug - show resolved dependency tree
-      shell: bash
-      run: |
-        echo "--- ${{ inputs.repo-path }}/dependencies ---"
-        find "${{ inputs.repo-path }}/dependencies" -maxdepth 3 2>/dev/null || echo "(no dependencies dir)"
-        echo "--- contents check ---"
-        for d in "${{ inputs.repo-path }}"/dependencies/*/; do
-          name=$(basename "$d")
-          count=$(find "$d" -type f 2>/dev/null | wc -l)
-          echo "$name: $count files"
-        done
+      run: git submodule update --init --remote --depth 1
 
     - name: Install Java
       uses: actions/setup-java@v4
@@ -146,8 +90,8 @@ runs:
         curl -L https://raw.githubusercontent.com/lefou/millw/main/millw > mill
         chmod +x mill
         sudo mv mill /usr/local/bin/mill
-        if [ ! -f "${{ inputs.repo-path }}/.mill-version" ]; then
-          echo "${{ inputs.mill-version }}" > "${{ inputs.repo-path }}/.mill-version"
+        if [ ! -f .mill-version ]; then
+          echo "${{ inputs.mill-version }}" > .mill-version
         fi
         if [ ! -f playground/.mill-version ]; then
           echo "${{ inputs.mill-version }}" > playground/.mill-version
@@ -171,35 +115,36 @@ runs:
         fi
         firtool --version
 
-    - name: Cache verilator build
-      id: verilator-cache
-      uses: actions/cache@v4
-      with:
-        path: |
-          /usr/local/bin/verilator*
-          /usr/local/share/verilator
-        key: verilator-${{ inputs.verilator-version }}
-
-    - name: Build and install verilator
-      # apt's verilator is whatever Ubuntu's repo currently ships, which
-      # does NOT match the exact version playground/Makefile.include's
-      # check-verilator enforces (Verilator 5.012 2023-06-13 rev v5.012).
-      # Build the pinned tag from source instead, same pin-and-cache
-      # pattern as firtool above.
+    # Was an open question in earlier discussion (mmu's `test` target
+    # depends on check-verilator, cr_ni's `check`/verilate path does too)
+    # -- not confirmed preinstalled on GitHub-hosted runners, so installing
+    # explicitly here rather than assuming.
+    - name: Install verilator
       shell: bash
       run: |
         set -euo pipefail
-        if command -v verilator &> /dev/null && verilator --version | grep -q "${{ inputs.verilator-version }}"; then
-          verilator --version
-          exit 0
+        if ! command -v verilator &> /dev/null; then
+          sudo apt-get update -qq
+          sudo apt-get install -y verilator
         fi
-        sudo apt-get update -y
-        sudo apt-get install -y git help2man perl python3 make autoconf g++ flex bison \
-          ccache libgoogle-perftools-dev numactl perl-doc libfl2 libfl-dev zlib1g zlib1g-dev
-        git clone --depth=1 --branch "${{ inputs.verilator-version }}" https://github.com/verilator/verilator.git /tmp/verilator-src
-        cd /tmp/verilator-src
-        autoconf
-        ./configure
-        make -j"$(nproc)"
-        sudo make install
         verilator --version
+
+    # Mill's location varies by repo: some rely on the sibling
+    # playground/mill; others (e.g. cr_ni) commit their own ./mill
+    # directly. Handles both without needing to know in advance which
+    # style a given repo uses, and never clobbers a repo's own committed
+    # launcher.
+    - name: Ensure a Mill launcher is available where this repo expects it
+      shell: bash
+      run: |
+        set -euo pipefail
+        if [ -f ./mill ]; then
+          chmod +x ./mill
+          echo "Using this repo's own committed ./mill"
+        elif [ -f playground/mill ]; then
+          chmod +x playground/mill
+          echo "Using sibling playground/mill (no ./mill committed in this repo)"
+        else
+          echo "ERROR: no mill launcher found at ./mill or playground/mill" >&2
+          exit 1
+        fi
