@@ -5,7 +5,7 @@ on:
       CI_SSH_PRIVATE_KEY:
         required: false
 jobs:
-  
+
   check-mergeable:
     if: github.event_name == 'pull_request' && github.event.pull_request.base.ref == 'main'
     runs-on: ubuntu-latest
@@ -29,21 +29,21 @@ jobs:
             git merge --abort 2>/dev/null || true
             exit 1
           fi
+
   ci:
-    
     if: github.event_name != 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout caller repo
         uses: actions/checkout@v4
         with:
-          submodules: false 
-     
+          submodules: false
+
       - name: Setup toolchain and resolve dependencies
         uses: shau-08/CICD/.github/actions/setup-toolchain@main
         with:
           ssh-private-key: ${{ secrets.CI_SSH_PRIVATE_KEY }}
-     
+
       - name: Cache Mill compiled output
         uses: actions/cache@v4
         with:
@@ -51,15 +51,16 @@ jobs:
           key: mill-out-${{ runner.os }}-${{ github.event.repository.name }}-${{ hashFiles('dependencies/**/*.scala', 'build.sc', 'playground/**/*.scala', 'playground/build.sc') }}
           restore-keys: |
             mill-out-${{ runner.os }}-${{ github.event.repository.name }}-
+
       - name: Run tests
         env:
           JAVA_OPTS: "-Xmx4g -Xss8m"
         run: make test
-   
-      - name: Lint (if this repo has a lint target)
+
+      - name: Lint
         run: |
           if make -n lint >/dev/null 2>&1; then
             make lint
           else
-            echo "No 'lint' target in this repo's Makefile — skipping."
+            echo "No 'lint' target resolvable (missing include or project/MILL vars) — skipping."
           fi
