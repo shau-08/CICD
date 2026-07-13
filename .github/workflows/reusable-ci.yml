@@ -4,8 +4,38 @@ on:
     secrets:
       CI_SSH_PRIVATE_KEY:
         required: false
-
 jobs:
+  # Runs first, fast, on PRs targeting main only. Fails loudly and early
+  # if the PR can't be cleanly merged, instead of letting people discover
+  # a conflict only when they try to actually click the merge button.
+  # Scoped via github.event.pull_request.base.ref rather than relying on
+  # each repo's own caller ci.yml `on:` filters -- works the same
+  # regardless of how a given repo's trigger file is set up.
+  check-mergeable:
+    if: github.event_name == 'pull_request' && github.event.pull_request.base.ref == 'main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout PR head (full history needed to attempt a real merge)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Attempt merge with main
+        run: |
+          set -euo pipefail
+          git config user.email "ci-mergeable-check@local"
+          git config user.name "CI Mergeable Check"
+          git fetch origin main
+          if git merge --no-commit --no-ff origin/main; then
+            echo "PR merges cleanly with main."
+            git merge --abort 2>/dev/null || true
+          else
+            echo "::error::This PR has merge conflicts with main and cannot be merged as-is. Rebase or merge main into your branch to resolve."
+            git merge --abort 2>/dev/null || true
+            exit 1
+          fi
+
   ci:
     # Excluded from workflow_dispatch so a manual CD run on this same repo
     # doesn't also trigger CI on the caller side.
@@ -16,13 +46,11 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: false # dependencies/ resolution is handled by setup-toolchain
-
       # Replace ORG/Chisel-RTL with wherever this composite action actually lives.
       - name: Setup toolchain and resolve dependencies
         uses: shau-08/CICD/.github/actions/setup-toolchain@main
         with:
           ssh-private-key: ${{ secrets.CI_SSH_PRIVATE_KEY }}
-
       # Moved to AFTER dependency resolution: with submodules:false at
       # checkout, dependencies/ is empty until setup-toolchain populates
       # it. Hashing it beforehand always produced an empty-string key
@@ -36,12 +64,10 @@ jobs:
           key: mill-out-${{ runner.os }}-${{ github.event.repository.name }}-${{ hashFiles('dependencies/**/*.scala', 'build.sc') }}
           restore-keys: |
             mill-out-${{ runner.os }}-${{ github.event.repository.name }}-
-
       - name: Run tests
         env:
           JAVA_OPTS: "-Xmx4g -Xss8m"
         run: make test
-
       # `lint` is not a universal target (confirmed present only in cr_ni,
       # absent in mmu, rrm, and playground/Makefile.include as of this
       # writing). Probe first so repos without it don't hard-fail CI.
