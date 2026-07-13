@@ -18,7 +18,7 @@ on:
         required: false
 jobs:
   cd:
-    
+
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     environment: production
@@ -31,12 +31,12 @@ jobs:
         with:
           submodules: false
           ref: ${{ github.ref_name }}
-      
+
       - name: Setup toolchain and resolve dependencies
         uses: shau-08/CICD/.github/actions/setup-toolchain@main
         with:
           ssh-private-key: ${{ secrets.CI_SSH_PRIVATE_KEY }}
-      
+
       - name: Cache Mill compiled output
         uses: actions/cache@v4
         with:
@@ -67,7 +67,7 @@ jobs:
             exit 1
           fi
           tar -czvf "generated-rtl-${{ steps.tag.outputs.tag }}.tar.gz" "$out/"
- 
+
       - name: Create or update Release
         uses: softprops/action-gh-release@v2
         with:
@@ -77,5 +77,5 @@ jobs:
           generate_release_notes: true
           fail_on_unmatched_files: true
         env:
-          
+
           GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
