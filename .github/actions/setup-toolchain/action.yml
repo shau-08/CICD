@@ -38,9 +38,7 @@ inputs:
 runs:
   using: 'composite'
   steps:
-    # Must run before ANY step that clones/fetches a private repo --
-    # playground itself may be private, and dependencies/* almost
-    # certainly includes private repos (confirmed: redefine-header is).
+    
     - name: Configure SSH access for private repos
       if: inputs.ssh-private-key != ''
       uses: webfactory/ssh-agent@v0.9.0
@@ -55,26 +53,12 @@ runs:
         fetch-depth: 1
         ssh-key: ${{ inputs.ssh-private-key }}
 
-    # actions/checkout's `path` can only place a repo UNDER
-    # $GITHUB_WORKSPACE (confirmed: not officially supported to escape it
-    # with `../`), so the step above lands playground at
-    # <calling-repo>/playground -- nested inside the calling repo's own
-    # checkout. But every project repo's Makefile (mmu, cr_ni, etc.)
-    # references it as a SIBLING: `-include ./../playground/Makefile.include`.
-    # Verified: with the nested layout, that `-include` silently finds
-    # nothing (a leading `-` suppresses the missing-file error), which
-    # surfaces later as a confusing "No rule to make target
-    # 'check-verilator'" instead of a clear path error.
-    # This symlink makes ../playground resolve correctly from the calling
-    # repo's root without needing to fight actions/checkout's own
-    # workspace restriction.
+    
     - name: Make playground resolvable as a sibling directory (../playground)
       shell: bash
       run: ln -s "$GITHUB_WORKSPACE/playground" "$(dirname "$GITHUB_WORKSPACE")/playground"
 
-    # Fails fast with ONE clear message instead of letting git retry-and-fail
-    # separately for every git@github.com: submodule below (which is
-    # confusing to read and slower to diagnose).
+   
     - name: Warn early if SSH-auth submodules exist but no key was provided
       shell: bash
       run: |
@@ -87,44 +71,13 @@ runs:
           fi
         fi
 
-    # TEMPORARY WORKAROUND -- remove once playground/.gitmodules is fixed
-    # upstream. playground/.gitmodules currently pins rocket-chip to
-    # `branch = dev`, which does not exist on morphingmachines/rocket-chip
-    # (only `master` and `devMM` do) -- this made the generic --remote
-    # step below fail with "Unable to find refs/remotes/origin/dev".
-    # Setting the override HERE, in local git config, takes precedence
-    # over playground/.gitmodules for the following step, without ever
-    # writing back to playground's own committed .gitmodules -- so this
-    # needs no write access to playground and no admin sign-off to ship.
-    # Confirmed with repo owner: use `master`, not `devMM`, for now.
-    #
-    # IMPORTANT: `git config submodule.<X>.branch` is keyed by the
-    # submodule's declared NAME (the string in `[submodule "..."]`),
-    # NOT its path. playground/.gitmodules declares this one as
-    # `[submodule "rocket-chip"]` with `path = dependencies/rocket-chip`
-    # -- name and path differ here (confirmed directly from the real
-    # .gitmodules; the same file also has an unrelated orphaned
-    # `[submodule "dependencies/rocket-chip"]` block with no path/url,
-    # which is dead config, not the real submodule -- do not key on it).
-    # Keying this override on the path instead of the name silently
-    # targets nothing and reproduces the exact same failure with zero
-    # error indicating the override didn't apply -- verified this
-    # exact failure mode before landing on the fix below.
+  
     - name: Override stale branch pin for rocket-chip (temporary, until playground/.gitmodules is fixed upstream)
       shell: bash
       working-directory: playground
       run: git config submodule.rocket-chip.branch master
 
-    # Single level only, per direction confirmed with the repo owner: NOT
-    # recursive into nested .gitmodules. Both playground's own direct
-    # dependencies and this repo's own direct dependencies/ entries get
-    # updated to the latest commit on their tracked branch (--remote,
-    # ignoring whatever SHA is pinned in the parent's tree), fetched
-    # shallow (--depth 1). Works for whatever a given repo declares in
-    # its own .gitmodules -- nothing here is hardcoded to specific names.
-    # Deliberately does NOT rewrite SSH URLs to HTTPS -- that broke
-    # private-repo access entirely; the ssh-agent step above handles auth
-    # for both public and private submodules uniformly.
+
     - name: Update playground's submodules (latest commit, depth 1, non-recursive)
       shell: bash
       working-directory: playground
@@ -183,18 +136,7 @@ runs:
         fi
         firtool --version
 
-    # Was an open question in earlier discussion (mmu's `test` target
-    # depends on check-verilator, cr_ni's `check`/verilate path does too)
-    # -- not confirmed preinstalled on GitHub-hosted runners, so installing
-    # explicitly here rather than assuming.
-    # NOTE: playground/Makefile.include hard-checks for an EXACT version
-    # (confirmed via a real failed run: "Expected verilator version:
-    # Verilator 5.012 2023-06-13 rev v5.012 not found"). Ubuntu's apt
-    # package tracks whatever single version is in that Ubuntu release --
-    # not 5.012 specifically -- and per Verilator's own docs, distro
-    # packages "almost never have the most recent version" either way, so
-    # apt-get can't reliably hit an exact pin. Building from git at the
-    # exact tag is the documented way to pin a specific version.
+   
     - name: Cache verilator build
       uses: actions/cache@v4
       id: verilator-cache
@@ -226,11 +168,7 @@ runs:
       shell: bash
       run: verilator --version
 
-    # Mill's location varies by repo: some rely on the sibling
-    # playground/mill; others (e.g. cr_ni) commit their own ./mill
-    # directly. Handles both without needing to know in advance which
-    # style a given repo uses, and never clobbers a repo's own committed
-    # launcher.
+  
     - name: Ensure a Mill launcher is available where this repo expects it
       shell: bash
       run: |
