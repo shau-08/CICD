@@ -20,7 +20,6 @@ jobs:
         with:
           fetch-depth: 0
           ref: ${{ github.event.pull_request.head.sha }}
-
       - name: Attempt merge with main
         run: |
           set -euo pipefail
@@ -35,7 +34,6 @@ jobs:
             git merge --abort 2>/dev/null || true
             exit 1
           fi
-
   ci:
     # Excluded from workflow_dispatch so a manual CD run on this same repo
     # doesn't also trigger CI on the caller side.
@@ -57,11 +55,24 @@ jobs:
       # (zero .scala files found), so the cache never actually varied
       # with dependency content -- silently useless. Placing this step
       # here fixes that.
+      #
+      # CORRECTED: the key previously hashed only this repo's own
+      # dependencies/**/*.scala and build.sc. But dependencies/* and
+      # playground/dependencies/* both resolve to whatever's latest on
+      # every run (--remote, per setup-toolchain) -- and setup-toolchain
+      # also fetches playground itself fresh via actions/checkout, so
+      # playground's own tracked sources can change independently of
+      # anything in this repo's tree. Hashing only this repo's files
+      # meant a change confined to playground's own dependency tree
+      # (e.g. rocket-chip, chipyard) left the cache key identical even
+      # though the actual sources Mill compiles against had changed.
+      # Adding playground/**/*.scala and playground/build.sc closes that
+      # gap so the key varies with everything Mill can actually see.
       - name: Cache Mill compiled output
         uses: actions/cache@v4
         with:
           path: out
-          key: mill-out-${{ runner.os }}-${{ github.event.repository.name }}-${{ hashFiles('dependencies/**/*.scala', 'build.sc') }}
+          key: mill-out-${{ runner.os }}-${{ github.event.repository.name }}-${{ hashFiles('dependencies/**/*.scala', 'build.sc', 'playground/**/*.scala', 'playground/build.sc') }}
           restore-keys: |
             mill-out-${{ runner.os }}-${{ github.event.repository.name }}-
       - name: Run tests
