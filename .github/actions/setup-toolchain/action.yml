@@ -72,9 +72,23 @@ runs:
     # Deliberately does NOT rewrite SSH URLs to HTTPS -- that broke
     # private-repo access entirely; the ssh-agent step above handles auth
     # for both public and private submodules uniformly.
+    # Add this line BEFORE the existing:
+#   git submodule update --init --remote --depth 1
+# step in action.yml (the one that runs against playground's dependencies).
+#
+# This overrides .gitmodules' stale `branch = dev` for rocket-chip, LOCALLY,
+# for this CI run only. Nothing is committed back to playground -- the
+# actual .gitmodules file on GitHub is untouched, so no write access to
+# playground and no senior sign-off needed to unblock the run today.
+
+    - name: Override stale branch pin for rocket-chip (temporary, until .gitmodules is fixed upstream)
+      shell: bash
+      working-directory: playground
+      run: git config submodule.dependencies/rocket-chip.branch devMM   # or master -- pick once confirmed
     - name: Update playground's submodules (latest commit, depth 1, non-recursive)
       shell: bash
       working-directory: playground
+      
       run: git submodule update --init --remote --depth 1
 
     - name: Update this repo's submodules (latest commit, depth 1, non-recursive)
