@@ -16,7 +16,6 @@ on:
         required: false
       RELEASE_TOKEN:
         required: false
-
 jobs:
   cd:
     # Only ever runs from a manual dispatch on the caller.
@@ -32,29 +31,34 @@ jobs:
         with:
           submodules: false
           ref: ${{ github.ref_name }}
-
       # Replace ORG/Chisel-RTL with wherever this composite action actually lives.
       - name: Setup toolchain and resolve dependencies
         uses: shau-08/CICD/.github/actions/setup-toolchain@main
         with:
           ssh-private-key: ${{ secrets.CI_SSH_PRIVATE_KEY }}
-
       # Same fix as reusable-ci.yml: moved to AFTER dependency resolution
       # so hashFiles actually sees resolved submodule content, not an
       # empty dependencies/ directory.
+      #
+      # CORRECTED: cache key now also hashes playground/**/*.scala and
+      # playground/build.sc, for the same reason as reusable-ci.yml --
+      # playground's own dependency tree can change independently of
+      # this repo's tracked files, since both resolve to latest on every
+      # run. Keeping this key identical to reusable-ci.yml's on purpose,
+      # since CI and CD should invalidate the cache under the same
+      # conditions rather than drifting into two different notions of
+      # "what changed."
       - name: Cache Mill compiled output
         uses: actions/cache@v4
         with:
           path: out
-          key: mill-out-${{ runner.os }}-${{ github.event.repository.name }}-${{ hashFiles('dependencies/**/*.scala', 'build.sc') }}
+          key: mill-out-${{ runner.os }}-${{ github.event.repository.name }}-${{ hashFiles('dependencies/**/*.scala', 'build.sc', 'playground/**/*.scala', 'playground/build.sc') }}
           restore-keys: |
             mill-out-${{ runner.os }}-${{ github.event.repository.name }}-
-
       - name: Generate RTL
         env:
           JAVA_OPTS: "-Xmx4g -Xss8m"
         run: make rtl
-
       - name: Resolve tag name
         id: tag
         run: |
@@ -65,7 +69,6 @@ jobs:
             tag="${{ github.event.repository.name }}-${{ github.ref_name }}-$(date +%Y%m%d)-${GITHUB_SHA::7}"
             echo "tag=${tag}" >> "$GITHUB_OUTPUT"
           fi
-
       - name: Package RTL
         run: |
           set -euo pipefail
@@ -75,7 +78,6 @@ jobs:
             exit 1
           fi
           tar -czvf "generated-rtl-${{ steps.tag.outputs.tag }}.tar.gz" "$out/"
-
       # softprops/action-gh-release upserts by default: if this tag already
       # has a release (e.g. same-commit same-day re-run), it updates it
       # instead of failing, which is what handles the tag-collision case.
