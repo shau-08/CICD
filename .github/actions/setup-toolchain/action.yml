@@ -47,6 +47,21 @@ runs:
         fetch-depth: 1
         ssh-key: ${{ inputs.ssh-private-key }}
 
+    # Fails fast with ONE clear message instead of letting git retry-and-fail
+    # separately for every git@github.com: submodule below (which is
+    # confusing to read and slower to diagnose).
+    - name: Warn early if SSH-auth submodules exist but no key was provided
+      shell: bash
+      run: |
+        if [ -z "${{ inputs.ssh-private-key }}" ]; then
+          if grep -q 'git@github.com:' playground/.gitmodules 2>/dev/null || grep -q 'git@github.com:' .gitmodules 2>/dev/null; then
+            echo "ERROR: one or more submodules use an SSH (git@github.com:) URL," >&2
+            echo "but no ssh-private-key was provided to this action. Confirm" >&2
+            echo "CI_SSH_PRIVATE_KEY is set as a repo or org Actions secret." >&2
+            exit 1
+          fi
+        fi
+
     # Single level only, per direction confirmed with the repo owner: NOT
     # recursive into nested .gitmodules. Both playground's own direct
     # dependencies and this repo's own direct dependencies/ entries get
