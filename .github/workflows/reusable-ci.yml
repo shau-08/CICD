@@ -5,12 +5,7 @@ on:
       CI_SSH_PRIVATE_KEY:
         required: false
 jobs:
-  # Runs first, fast, on PRs targeting main only. Fails loudly and early
-  # if the PR can't be cleanly merged, instead of letting people discover
-  # a conflict only when they try to actually click the merge button.
-  # Scoped via github.event.pull_request.base.ref rather than relying on
-  # each repo's own caller ci.yml `on:` filters -- works the same
-  # regardless of how a given repo's trigger file is set up.
+  
   check-mergeable:
     if: github.event_name == 'pull_request' && github.event.pull_request.base.ref == 'main'
     runs-on: ubuntu-latest
@@ -35,39 +30,20 @@ jobs:
             exit 1
           fi
   ci:
-    # Excluded from workflow_dispatch so a manual CD run on this same repo
-    # doesn't also trigger CI on the caller side.
+    
     if: github.event_name != 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout caller repo
         uses: actions/checkout@v4
         with:
-          submodules: false # dependencies/ resolution is handled by setup-toolchain
-      # Replace ORG/Chisel-RTL with wherever this composite action actually lives.
+          submodules: false 
+     
       - name: Setup toolchain and resolve dependencies
         uses: shau-08/CICD/.github/actions/setup-toolchain@main
         with:
           ssh-private-key: ${{ secrets.CI_SSH_PRIVATE_KEY }}
-      # Moved to AFTER dependency resolution: with submodules:false at
-      # checkout, dependencies/ is empty until setup-toolchain populates
-      # it. Hashing it beforehand always produced an empty-string key
-      # (zero .scala files found), so the cache never actually varied
-      # with dependency content -- silently useless. Placing this step
-      # here fixes that.
-      #
-      # CORRECTED: the key previously hashed only this repo's own
-      # dependencies/**/*.scala and build.sc. But dependencies/* and
-      # playground/dependencies/* both resolve to whatever's latest on
-      # every run (--remote, per setup-toolchain) -- and setup-toolchain
-      # also fetches playground itself fresh via actions/checkout, so
-      # playground's own tracked sources can change independently of
-      # anything in this repo's tree. Hashing only this repo's files
-      # meant a change confined to playground's own dependency tree
-      # (e.g. rocket-chip, chipyard) left the cache key identical even
-      # though the actual sources Mill compiles against had changed.
-      # Adding playground/**/*.scala and playground/build.sc closes that
-      # gap so the key varies with everything Mill can actually see.
+     
       - name: Cache Mill compiled output
         uses: actions/cache@v4
         with:
@@ -79,9 +55,7 @@ jobs:
         env:
           JAVA_OPTS: "-Xmx4g -Xss8m"
         run: make test
-      # `lint` is not a universal target (confirmed present only in cr_ni,
-      # absent in mmu, rrm, and playground/Makefile.include as of this
-      # writing). Probe first so repos without it don't hard-fail CI.
+   
       - name: Lint (if this repo has a lint target)
         run: |
           if make -n lint >/dev/null 2>&1; then
