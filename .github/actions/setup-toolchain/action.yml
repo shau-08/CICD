@@ -72,10 +72,23 @@ runs:
     # writing back to playground's own committed .gitmodules -- so this
     # needs no write access to playground and no admin sign-off to ship.
     # Confirmed with repo owner: use `master`, not `devMM`, for now.
+    #
+    # IMPORTANT: `git config submodule.<X>.branch` is keyed by the
+    # submodule's declared NAME (the string in `[submodule "..."]`),
+    # NOT its path. playground/.gitmodules declares this one as
+    # `[submodule "rocket-chip"]` with `path = dependencies/rocket-chip`
+    # -- name and path differ here (confirmed directly from the real
+    # .gitmodules; the same file also has an unrelated orphaned
+    # `[submodule "dependencies/rocket-chip"]` block with no path/url,
+    # which is dead config, not the real submodule -- do not key on it).
+    # Keying this override on the path instead of the name silently
+    # targets nothing and reproduces the exact same failure with zero
+    # error indicating the override didn't apply -- verified this
+    # exact failure mode before landing on the fix below.
     - name: Override stale branch pin for rocket-chip (temporary, until playground/.gitmodules is fixed upstream)
       shell: bash
       working-directory: playground
-      run: git config submodule.dependencies/rocket-chip.branch master
+      run: git config submodule.rocket-chip.branch master
 
     # Single level only, per direction confirmed with the repo owner: NOT
     # recursive into nested .gitmodules. Both playground's own direct
