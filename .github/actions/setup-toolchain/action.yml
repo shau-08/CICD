@@ -18,6 +18,14 @@ inputs:
     description: 'firtool version to install'
     required: false
     default: '1.62.1'
+  verilator-version:
+    description: >
+      Exact verilator version to build and install. Must match whatever
+      version playground/Makefile.include's check-verilator target
+      expects -- confirmed via a real CI failure that this check is
+      exact-match, not >=.
+    required: false
+    default: '5.012'
   ssh-private-key:
     description: >
       SSH deploy key with read access to private dependency repos (e.g.
@@ -179,15 +187,44 @@ runs:
     # depends on check-verilator, cr_ni's `check`/verilate path does too)
     # -- not confirmed preinstalled on GitHub-hosted runners, so installing
     # explicitly here rather than assuming.
-    - name: Install verilator
+    # NOTE: playground/Makefile.include hard-checks for an EXACT version
+    # (confirmed via a real failed run: "Expected verilator version:
+    # Verilator 5.012 2023-06-13 rev v5.012 not found"). Ubuntu's apt
+    # package tracks whatever single version is in that Ubuntu release --
+    # not 5.012 specifically -- and per Verilator's own docs, distro
+    # packages "almost never have the most recent version" either way, so
+    # apt-get can't reliably hit an exact pin. Building from git at the
+    # exact tag is the documented way to pin a specific version.
+    - name: Cache verilator build
+      uses: actions/cache@v4
+      id: verilator-cache
+      with:
+        path: /opt/verilator-${{ inputs.verilator-version }}
+        key: verilator-${{ inputs.verilator-version }}-${{ runner.os }}
+
+    - name: Build verilator (exact pinned version, only runs on cache miss)
+      if: steps.verilator-cache.outputs.cache-hit != 'true'
       shell: bash
       run: |
         set -euo pipefail
-        if ! command -v verilator &> /dev/null; then
-          sudo apt-get update -qq
-          sudo apt-get install -y verilator
-        fi
-        verilator --version
+        sudo apt-get update -qq
+        sudo apt-get install -y git help2man perl python3 make autoconf g++ flex bison \
+          libfl2 libfl-dev zlibc zlib1g zlib1g-dev
+        git clone --depth 1 --branch v${{ inputs.verilator-version }} https://github.com/verilator/verilator.git /tmp/verilator-src
+        cd /tmp/verilator-src
+        autoconf
+        ./configure --prefix=/opt/verilator-${{ inputs.verilator-version }}
+        make -j"$(nproc)"
+        sudo make install
+
+    - name: Add verilator to PATH
+      shell: bash
+      run: |
+        echo "/opt/verilator-${{ inputs.verilator-version }}/bin" >> "$GITHUB_PATH"
+
+    - name: Verify verilator version
+      shell: bash
+      run: verilator --version
 
     # Mill's location varies by repo: some rely on the sibling
     # playground/mill; others (e.g. cr_ni) commit their own ./mill
