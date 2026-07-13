@@ -62,6 +62,21 @@ runs:
           fi
         fi
 
+    # TEMPORARY WORKAROUND -- remove once playground/.gitmodules is fixed
+    # upstream. playground/.gitmodules currently pins rocket-chip to
+    # `branch = dev`, which does not exist on morphingmachines/rocket-chip
+    # (only `master` and `devMM` do) -- this made the generic --remote
+    # step below fail with "Unable to find refs/remotes/origin/dev".
+    # Setting the override HERE, in local git config, takes precedence
+    # over playground/.gitmodules for the following step, without ever
+    # writing back to playground's own committed .gitmodules -- so this
+    # needs no write access to playground and no admin sign-off to ship.
+    # Confirmed with repo owner: use `master`, not `devMM`, for now.
+    - name: Override stale branch pin for rocket-chip (temporary, until playground/.gitmodules is fixed upstream)
+      shell: bash
+      working-directory: playground
+      run: git config submodule.dependencies/rocket-chip.branch master
+
     # Single level only, per direction confirmed with the repo owner: NOT
     # recursive into nested .gitmodules. Both playground's own direct
     # dependencies and this repo's own direct dependencies/ entries get
@@ -72,23 +87,9 @@ runs:
     # Deliberately does NOT rewrite SSH URLs to HTTPS -- that broke
     # private-repo access entirely; the ssh-agent step above handles auth
     # for both public and private submodules uniformly.
-    # Add this line BEFORE the existing:
-#   git submodule update --init --remote --depth 1
-# step in action.yml (the one that runs against playground's dependencies).
-#
-# This overrides .gitmodules' stale `branch = dev` for rocket-chip, LOCALLY,
-# for this CI run only. Nothing is committed back to playground -- the
-# actual .gitmodules file on GitHub is untouched, so no write access to
-# playground and no senior sign-off needed to unblock the run today.
-
-    - name: Override stale branch pin for rocket-chip (temporary, until .gitmodules is fixed upstream)
-      shell: bash
-      working-directory: playground
-      run: git config submodule.dependencies/rocket-chip.branch devMM   # or master -- pick once confirmed
     - name: Update playground's submodules (latest commit, depth 1, non-recursive)
       shell: bash
       working-directory: playground
-      
       run: git submodule update --init --remote --depth 1
 
     - name: Update this repo's submodules (latest commit, depth 1, non-recursive)
