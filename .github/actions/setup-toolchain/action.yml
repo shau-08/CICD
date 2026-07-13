@@ -209,7 +209,7 @@ runs:
         set -euo pipefail
         sudo apt-get update -qq
         sudo apt-get install -y git help2man perl python3 make autoconf g++ flex bison \
-          libfl2 libfl-dev zlibc zlib1g zlib1g-dev
+          libfl2 libfl-dev zlib1g zlib1g-dev
         git clone --depth 1 --branch v${{ inputs.verilator-version }} https://github.com/verilator/verilator.git /tmp/verilator-src
         cd /tmp/verilator-src
         autoconf
