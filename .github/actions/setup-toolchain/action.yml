@@ -47,6 +47,23 @@ runs:
         fetch-depth: 1
         ssh-key: ${{ inputs.ssh-private-key }}
 
+    # actions/checkout's `path` can only place a repo UNDER
+    # $GITHUB_WORKSPACE (confirmed: not officially supported to escape it
+    # with `../`), so the step above lands playground at
+    # <calling-repo>/playground -- nested inside the calling repo's own
+    # checkout. But every project repo's Makefile (mmu, cr_ni, etc.)
+    # references it as a SIBLING: `-include ./../playground/Makefile.include`.
+    # Verified: with the nested layout, that `-include` silently finds
+    # nothing (a leading `-` suppresses the missing-file error), which
+    # surfaces later as a confusing "No rule to make target
+    # 'check-verilator'" instead of a clear path error.
+    # This symlink makes ../playground resolve correctly from the calling
+    # repo's root without needing to fight actions/checkout's own
+    # workspace restriction.
+    - name: Make playground resolvable as a sibling directory (../playground)
+      shell: bash
+      run: ln -s "$GITHUB_WORKSPACE/playground" "$(dirname "$GITHUB_WORKSPACE")/playground"
+
     # Fails fast with ONE clear message instead of letting git retry-and-fail
     # separately for every git@github.com: submodule below (which is
     # confusing to read and slower to diagnose).
