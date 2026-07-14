@@ -11,6 +11,11 @@ on:
         required: false
         type: string
         default: generated_sv_dir
+      rtl_target_override:
+        description: 'Optional: override which make target runs (rtl or lazyrtl). Leave empty to use the repo's own cd.config.'
+        required: false
+        type: string
+        default: ''
     secrets:
       CI_SSH_PRIVATE_KEY:
         required: false
@@ -47,7 +52,12 @@ jobs:
       - name: Generate RTL
         env:
           JAVA_OPTS: "-Xmx4g -Xss8m"
-        run: make rtl
+        run: |
+          if [ -n "${{ inputs.rtl_target_override }}" ]; then
+            make ${{ inputs.rtl_target_override }}
+          else
+            make rtl-dispatch
+          fi
       - name: Resolve tag name
         id: tag
         run: |
