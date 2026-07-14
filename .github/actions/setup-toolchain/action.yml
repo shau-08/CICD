@@ -74,10 +74,7 @@ runs:
       working-directory: playground
       run: git submodule update --init --depth 1
 
-    - name: Initialize firrtl2 (nested submodule inside chipyard, scoped explicitly)
-      shell: bash
-      working-directory: playground/dependencies/chipyard
-      run: git submodule update --init --depth 1 -- tools/firrtl2
+   
 
     - name: Update this repo's submodules (pinned commit, one level, no --remote)
       shell: bash
