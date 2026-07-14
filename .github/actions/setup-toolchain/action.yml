@@ -73,6 +73,17 @@ runs:
       shell: bash
       working-directory: playground
       run: git submodule update --init --depth 1
+     
+    - name: DEBUG - inspect testchipip serdes API on runner
+      shell: bash
+      run: |
+        cd playground/dependencies/testchipip
+        echo "=== commit ==="
+        git log --oneline -1
+        echo "=== Parameters.scala contents ==="
+        cat src/main/scala/serdes/Parameters.scala
+        echo "=== Bundles.scala contents ==="
+        cat src/main/scala/serdes/Bundles.scala
 
    
 
