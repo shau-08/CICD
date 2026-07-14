@@ -88,18 +88,20 @@ runs:
       run: |
         set -euo pipefail
         if [ ! -f .gitmodules ]; then
-          echo "No .gitmodules in this repo — nothing to check."
-          exit 0
+        echo "No .gitmodules in this repo — nothing to check."
+        exit 0
         fi
         git submodule foreach '
-          pinned=$(git rev-parse HEAD)
-          branch=$(git config -f "$toplevel/.gitmodules" "submodule.$name.branch" 2>/dev/null || echo main)
-          latest=$(git ls-remote origin "refs/heads/$branch" 2>/dev/null | cut -f1)
-          if [ -n "$latest" ] && [ "$pinned" != "$latest" ]; then
-            echo "::warning::Submodule $name is pinned to ${pinned:0:7}, but latest on $branch is ${latest:0:7}. Using pinned commit as specified."
-          else
-            echo "Submodule $name is at latest commit (${pinned:0:7})."
-          fi
+        pinned=$(git rev-parse HEAD)
+        pinned_short=$(echo "$pinned" | cut -c1-7)
+        branch=$(git config -f "$toplevel/.gitmodules" "submodule.$name.branch" 2>/dev/null || echo main)
+        latest=$(git ls-remote origin "refs/heads/$branch" 2>/dev/null | cut -f1)
+        latest_short=$(echo "$latest" | cut -c1-7)
+        if [ -n "$latest" ] && [ "$pinned" != "$latest" ]; then
+        echo "::warning::Submodule $name is pinned to $pinned_short, but latest on $branch is $latest_short. Using pinned commit as specified."
+        else
+        echo "Submodule $name is at latest commit ($pinned_short)."
+        fi
         '
 
     - name: Install Java
