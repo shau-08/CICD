@@ -59,8 +59,27 @@ jobs:
 
       - name: Lint
         run: |
-          if make -n lint >/dev/null 2>&1; then
-            make lint
+          set -euo pipefail
+          if [ -f ./mill ]; then
+            MILL_BIN=./mill
           else
-            echo "No 'lint' target resolvable (missing include or project/MILL vars) — skipping."
+            MILL_BIN=playground/mill
           fi
+          # Auto-detect this repo's top-level Mill project name from its own
+          # build.sc, rather than hardcoding it. Convention (matches every
+          # build.sc we've seen): the repo's own root module is the one
+          # object whose millSourcePath is exactly `os.pwd` -- every
+          # dependency module instead appends path segments after it
+          # (e.g. `os.pwd / "dependencies" / ...`), so this line
+          # distinguishes "this repo's own module" from everything else.
+          PROJECT=$(awk '
+            /^object[ \t]+[A-Za-z_][A-Za-z0-9_]*/ { name=$2 }
+            /millSourcePath[ \t]*=[ \t]*os\.pwd[ \t]*$/ { print name; exit }
+          ' build.sc)
+          if [ -z "$PROJECT" ]; then
+            echo "ERROR: could not auto-detect top-level Mill project from build.sc" >&2
+            echo "(expected exactly one object with millSourcePath = os.pwd)" >&2
+            exit 1
+          fi
+          echo "Detected project: $PROJECT"
+          make -f playground/Makefile.include lint project="$PROJECT" MILL="$MILL_BIN"
