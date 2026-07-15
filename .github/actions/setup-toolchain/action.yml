@@ -83,7 +83,7 @@ runs:
       run: |
         set -euo pipefail
         if [ ! -f .gitmodules ]; then
-        echo "No .gitmodules in this repo — nothing to check."
+          echo "No .gitmodules in this repo — nothing to check."
         exit 0
         fi
         git submodule foreach '
@@ -93,9 +93,9 @@ runs:
         latest=$(git ls-remote origin "refs/heads/$branch" 2>/dev/null | cut -f1)
         latest_short=$(echo "$latest" | cut -c1-7)
         if [ -n "$latest" ] && [ "$pinned" != "$latest" ]; then
-        echo "::warning::Submodule $name is pinned to $pinned_short, but latest on $branch is $latest_short. Using pinned commit as specified."
+          echo "::warning::Submodule $name is pinned to $pinned_short, but latest on $branch is $latest_short. Using pinned commit as specified."
         else
-        echo "Submodule $name is at latest commit ($pinned_short)."
+          echo "Submodule $name is at latest commit ($pinned_short)."
         fi
         '
 
