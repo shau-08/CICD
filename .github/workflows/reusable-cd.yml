@@ -16,15 +16,42 @@ on:
         required: false
         type: string
         default: ''
+      ref:
+        description: >
+          Git ref (branch, tag, or full commit SHA) to check out before generating RTL.
+          Defaults to the ref that triggered this workflow. Callers that bump a
+          submodule pointer via an automated commit (e.g. a super-repo reacting to
+          a dependency's release via repository_dispatch) MUST pass the new commit
+          SHA here explicitly -- repository_dispatch pins github.ref to whatever the
+          default branch pointed to BEFORE that bump commit was pushed, so leaving
+          this at its default would silently build stale RTL against the old
+          submodule pointer.
+        required: false
+        type: string
+        default: ${{ github.ref }}
+      notify_repo:
+        description: >
+          Optional org/repo of a super-repo to notify via repository_dispatch after
+          a successful release (e.g. "your-org/RedefineIp"). Leave empty to skip
+          notification entirely.
+        required: false
+        type: string
+        default: ''
     secrets:
       CI_SSH_PRIVATE_KEY:
         required: false
       RELEASE_TOKEN:
         required: false
+      SUPER_REPO_DISPATCH_TOKEN:
+        required: false
 jobs:
   cd:
-
-    if: github.event_name == 'workflow_dispatch'
+    # No event_name guard here: this workflow's only trigger is `workflow_call`,
+    # so being invoked at all already means a caller explicitly wants a release.
+    # A guard like `github.event_name == 'workflow_dispatch'` would silently skip
+    # this job whenever the caller itself was triggered by something else (e.g.
+    # on-dependency-release.yml, triggered by repository_dispatch) -- github.event_name
+    # reflects the event that started the whole run, not the caller's own `uses:` call.
     runs-on: ubuntu-latest
     environment: production
     concurrency: rtl-release-${{ github.event.repository.name }}
@@ -35,7 +62,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: false
-          ref: ${{ github.ref_name }}
+          ref: ${{ inputs.ref }}
 
       - name: Setup toolchain and resolve dependencies
         uses: shau-08/CICD/.github/actions/setup-toolchain@main
@@ -65,7 +92,13 @@ jobs:
           if [ -n "${{ inputs.tag_name }}" ]; then
             echo "tag=${{ inputs.tag_name }}" >> "$GITHUB_OUTPUT"
           else
-            tag="${{ github.event.repository.name }}-${{ github.ref_name }}-$(date +%Y%m%d)-${GITHUB_SHA::7}"
+            # Use the commit actually checked out (inputs.ref resolved), NOT
+            # $GITHUB_SHA -- for a repository_dispatch-triggered caller (e.g. the
+            # super-repo's bump-and-regenerate flow), GITHUB_SHA is frozen at
+            # whatever commit existed BEFORE the bump commit was pushed, which
+            # would silently mislabel the release with the wrong/old short SHA.
+            actual_sha=$(git rev-parse HEAD)
+            tag="${{ github.event.repository.name }}-${{ github.ref_name }}-$(date +%Y%m%d)-${actual_sha::7}"
             echo "tag=${tag}" >> "$GITHUB_OUTPUT"
           fi
       - name: Package RTL
@@ -79,6 +112,7 @@ jobs:
           tar -czvf "generated-rtl-${{ steps.tag.outputs.tag }}.tar.gz" "$out/"
 
       - name: Create or update Release
+        id: release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.tag.outputs.tag }}
@@ -87,5 +121,26 @@ jobs:
           generate_release_notes: true
           fail_on_unmatched_files: true
         env:
-
           GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
+
+      - name: Resolve actually-built commit SHA (for notify payload)
+        if: inputs.notify_repo != ''
+        id: built_sha
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Notify super-repo of this release
+        if: inputs.notify_repo != ''
+        env:
+          GH_TOKEN: ${{ secrets.SUPER_REPO_DISPATCH_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${{ secrets.SUPER_REPO_DISPATCH_TOKEN }}" ]; then
+            echo "::error::notify_repo is set to '${{ inputs.notify_repo }}' but SUPER_REPO_DISPATCH_TOKEN secret is empty — cannot notify. Set the org-wide secret or drop notify_repo."
+            exit 1
+          fi
+          jq -n \
+            --arg repo "${{ github.repository }}" \
+            --arg tag "${{ steps.tag.outputs.tag }}" \
+            --arg sha "${{ steps.built_sha.outputs.sha }}" \
+            '{event_type: "dependency-released", client_payload: {repo: $repo, tag: $tag, sha: $sha}}' \
+            | gh api "repos/${{ inputs.notify_repo }}/dispatches" --input -
