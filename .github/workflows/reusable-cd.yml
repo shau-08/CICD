@@ -12,7 +12,7 @@ on:
         type: string
         default: generated_sv_dir
       rtl_target_override:
-        description: 'Optional: override which make target runs (rtl or lazyrtl). Leave empty to use the repo's own cd.config.'
+        description: "Optional: override which make target runs (rtl or lazyrtl). Leave empty to use the repo's own cd.config."
         required: false
         type: string
         default: ''
