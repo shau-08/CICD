@@ -125,4 +125,4 @@ Project repos never reference this secret directly — it flows through `secrets
 ## Known Issues / Cleanup TODO
 
 - **`playground.hash`** — at least one project repo (`TileLinkExplorer`) ships a `playground.hash` file, presumably intended to pin `playground` to a specific commit. `setup-toolchain/action.yml` does not currently read or use this file anywhere — `playground` is checked out at its live default-branch HEAD regardless. Either wire this in, or remove the file from project repos to avoid implying a guarantee that isn't actually enforced.
-- **Leftover debug step** — `setup-toolchain/action.yml` currently contains a step named `DEBUG - inspect testchipip serdes API on runner` that dumps internal file contents to CI logs on every run. Looks like a leftover from an earlier debugging session rather than intentional, ongoing behavior — worth removing.
+
