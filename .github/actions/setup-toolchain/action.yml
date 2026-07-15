@@ -48,7 +48,7 @@ runs:
     - name: Checkout playground (shared toolchain)
       uses: actions/checkout@v4
       with:
-        repository: morphingmachines/playground
+        repository: shau-08/playground-stub
         path: playground
         fetch-depth: 1
         ssh-key: ${{ inputs.ssh-private-key }}
