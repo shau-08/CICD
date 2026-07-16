@@ -11,7 +11,7 @@ on:
         type: string
         default: ''
     secrets:
-      CI_SUBMODULE_PAT:
+      CI_SUBMODULE_PAT0:
         required: false
 jobs:
 
@@ -51,7 +51,7 @@ jobs:
       - name: Setup toolchain and resolve dependencies
         uses: shau-08/CICD/.github/actions/setup-toolchain@main
         with:
-          submodule-token: ${{ secrets.CI_SUBMODULE_PAT }}
+          submodule-token: ${{ secrets.CI_SUBMODULE_PAT0 }}
           # Empty string and "unset" aren't the same thing to a composite
           # action's `with:` block -- passing '' explicitly would override
           # setup-toolchain's own default rather than falling back to it, so
