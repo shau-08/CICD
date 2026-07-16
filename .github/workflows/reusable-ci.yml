@@ -1,8 +1,17 @@
 name: Reusable CI Logic
 on:
   workflow_call:
+    inputs:
+      playground_repo:
+        description: >
+          The shared "playground" toolchain repo to check out as a sibling
+          directory. Forwarded straight through to setup-toolchain's
+          playground-repo input -- see that action for the default.
+        required: false
+        type: string
+        default: ''
     secrets:
-      CI_SSH_PRIVATE_KEY:
+      CI_SUBMODULE_PAT:
         required: false
 jobs:
 
@@ -42,7 +51,12 @@ jobs:
       - name: Setup toolchain and resolve dependencies
         uses: shau-08/CICD/.github/actions/setup-toolchain@main
         with:
-          ssh-private-key: ${{ secrets.CI_SSH_PRIVATE_KEY }}
+          submodule-token: ${{ secrets.CI_SUBMODULE_PAT }}
+          # Empty string and "unset" aren't the same thing to a composite
+          # action's `with:` block -- passing '' explicitly would override
+          # setup-toolchain's own default rather than falling back to it, so
+          # the fallback has to happen here rather than relying on that.
+          playground-repo: ${{ inputs.playground_repo != '' && inputs.playground_repo || 'shau-08/playground-stub' }}
 
       - name: Cache Mill compiled output
         uses: actions/cache@v4
