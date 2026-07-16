@@ -7,7 +7,7 @@ description: >
   one level only -- nested submodules (e.g. chipyard's own firrtl2
   submodule) are initialized via explicit, individually-scoped steps
   below rather than --recursive, so we never pull in submodules we
-  don't actually need.
+  don't actually need..
 
 inputs:
   mill-version:
