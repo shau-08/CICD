@@ -26,12 +26,26 @@ inputs:
       exact-match, not >=.
     required: false
     default: '5.012'
-  ssh-private-key:
+  playground-repo:
     description: >
-      SSH deploy key with read access to private dependency repos (e.g.
-      redefine-header). Composite actions can't read the secrets context
-      directly, so the caller workflow must pass secrets.CI_SSH_PRIVATE_KEY
+      The shared "playground" toolchain repo to check out as a sibling
+      directory. Defaults to the stub used for dry-run testing -- real
+      callers must override this with the actual org/repo (e.g.
+      "your-org/playground") once that's known.
+    required: false
+    default: 'shau-08/playground-stub'
+  submodule-token:
+    description: >
+      Personal access token (Contents: Read-only, scoped to this repo and
+      every dependencies/* submodule repo) used to read private submodules
+      over HTTPS. Composite actions can't read the secrets context
+      directly, so the caller workflow must pass secrets.CI_SUBMODULE_PAT
       into this input explicitly.
+
+      Replaces the earlier SSH-deploy-key approach: rather than adding a
+      deploy key to every dependency repo individually, this rewrites
+      git@github.com: submodule URLs to authenticated HTTPS at the git
+      config level, so .gitmodules itself never needs to change.
     required: false
     default: ''
 
@@ -39,32 +53,33 @@ runs:
   using: 'composite'
   steps:
 
-    - name: Configure SSH access for private repos
-      if: inputs.ssh-private-key != ''
-      uses: webfactory/ssh-agent@v0.9.0
-      with:
-        ssh-private-key: ${{ inputs.ssh-private-key }}
+    - name: Configure git to use PAT for SSH-style submodule URLs
+      if: inputs.submodule-token != ''
+      shell: bash
+      run: |
+        set -euo pipefail
+        git config --global url."https://x-access-token:${{ inputs.submodule-token }}@github.com/".insteadOf "git@github.com:"
 
     - name: Checkout playground (shared toolchain)
       uses: actions/checkout@v4
       with:
-        repository: shau-08/playground-stub
+        repository: ${{ inputs.playground-repo }}
         path: playground
         fetch-depth: 1
-        ssh-key: ${{ inputs.ssh-private-key }}
+        token: ${{ inputs.submodule-token || github.token }}
 
     - name: Make playground resolvable as a sibling directory (../playground)
       shell: bash
       run: ln -s "$GITHUB_WORKSPACE/playground" "$(dirname "$GITHUB_WORKSPACE")/playground"
 
-    - name: Warn early if SSH-auth submodules exist but no key was provided
+    - name: Warn early if SSH-auth submodules exist but no token was provided
       shell: bash
       run: |
-        if [ -z "${{ inputs.ssh-private-key }}" ]; then
+        if [ -z "${{ inputs.submodule-token }}" ]; then
           if grep -q 'git@github.com:' playground/.gitmodules 2>/dev/null || grep -q 'git@github.com:' .gitmodules 2>/dev/null; then
             echo "ERROR: one or more submodules use an SSH (git@github.com:) URL," >&2
-            echo "but no ssh-private-key was provided to this action. Confirm" >&2
-            echo "CI_SSH_PRIVATE_KEY is set as a repo or org Actions secret." >&2
+            echo "but no submodule-token was provided to this action. Confirm" >&2
+            echo "CI_SUBMODULE_PAT is set as a repo or org Actions secret." >&2
             exit 1
           fi
         fi
@@ -73,7 +88,7 @@ runs:
       shell: bash
       working-directory: playground
       run: git submodule update --init --depth 1
-     
+
     - name: Update this repo's submodules (pinned commit, one level, no --remote)
       shell: bash
       run: git submodule update --init --depth 1
