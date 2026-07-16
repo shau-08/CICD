@@ -37,6 +37,16 @@ on:
         required: false
         type: string
         default: ''
+      commit_generated_output:
+        description: >
+          If true, additionally commit build_output_path directly into this repo
+          (on top of still publishing the Release tarball) so generated_sv_dir
+          stays up to date in the repo's own tree. Off by default -- opt in per
+          caller so this doesn't silently change behavior for repos that only
+          want the Release artifact.
+        required: false
+        type: boolean
+        default: false
     secrets:
       CI_SSH_PRIVATE_KEY:
         required: false
@@ -101,6 +111,37 @@ jobs:
             tag="${{ github.event.repository.name }}-${{ github.ref_name }}-$(date +%Y%m%d)-${actual_sha::7}"
             echo "tag=${tag}" >> "$GITHUB_OUTPUT"
           fi
+      - name: Commit generated output
+        if: inputs.commit_generated_output == true
+        run: |
+          set -euo pipefail
+          out="${{ inputs.build_output_path }}"
+
+          # generated_sv_dir/* is typically in .gitignore (it's a build output),
+          # but files already tracked there stay tracked regardless -- gitignore
+          # only blocks *new* untracked paths from `git add`. Plain `git add`
+          # would then silently skip any genuinely new filename that shows up in
+          # a future run while still updating the already-tracked ones. `-f`
+          # forces both new and existing files in, so nothing is dropped.
+          git add -f "$out"
+
+          if git diff --cached --quiet; then
+            echo "No changes in $out -- skipping commit."
+          else
+            git config user.name "ci-bot"
+            git config user.email "ci-bot@users.noreply.github.com"
+            git commit -m "chore: update generated RTL output ($out) for ${{ steps.tag.outputs.tag }}"
+
+            # Same dynamic default-branch detection used elsewhere in this repo's
+            # workflows (e.g. on-dependency-release.yml's bump-submodule job):
+            # this pushes to the receiving repo's actual default branch,
+            # regardless of which branch/ref triggered this run. See that
+            # workflow's comments for the known limitation this implies for
+            # non-default-branch triggers.
+            default_branch=$(git remote show origin | awk '/HEAD branch/ {print $NF}')
+            git push origin "HEAD:$default_branch"
+          fi
+
       - name: Package RTL
         run: |
           set -euo pipefail
