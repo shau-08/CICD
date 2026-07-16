@@ -1,89 +1,105 @@
 name: Reusable CD Logic
+
+# Shared release pipeline for all Chisel RTL repos. Generates RTL, publishes it
+# as a GitHub Release, and optionally (a) commits the generated output back
+# into the repo and (b) notifies a downstream "super-repo" so it can bump its
+# submodule pointer. Called via `uses:` from each repo's own cd.yml.
+
 on:
   workflow_call:
     inputs:
+      # --- Release identity -----------------------------------------------
       tag_name:
-        description: 'Release tag to use. Leave empty to auto-generate <repo>-<branch>-<date>-<sha>.'
+        description: 'Release tag. Leave empty to auto-generate <repo>-<branch>-<date>-<sha>.'
         required: false
         type: string
-      build_output_path:
-        description: 'Directory containing generated RTL to package'
-        required: false
-        type: string
-        default: generated_sv_dir
-      rtl_target_override:
-        description: "Optional: override which make target runs (rtl or lazyrtl). Leave empty to use the repo's own cd.config."
-        required: false
-        type: string
-        default: ''
+
       ref:
         description: >
-          Git ref (branch, tag, or full commit SHA) to check out before generating RTL.
-          Defaults to the ref that triggered this workflow. Callers that bump a
-          submodule pointer via an automated commit (e.g. a super-repo reacting to
-          a dependency's release via repository_dispatch) MUST pass the new commit
-          SHA here explicitly -- repository_dispatch pins github.ref to whatever the
-          default branch pointed to BEFORE that bump commit was pushed, so leaving
-          this at its default would silently build stale RTL against the old
-          submodule pointer.
+          Git ref (branch, tag, or full commit SHA) to build from. Defaults to
+          the ref that triggered this run.
+          Required override: callers driven by repository_dispatch (e.g. a
+          super-repo's automated submodule bump) must pass the new commit SHA
+          explicitly. github.ref in that context still points at the commit
+          BEFORE the bump was pushed, so the default would silently build
+          stale RTL.
         required: false
         type: string
         default: ${{ github.ref }}
-      notify_repo:
-        description: >
-          Optional org/repo of a super-repo to notify via repository_dispatch after
-          a successful release (e.g. "your-org/RedefineIp"). Leave empty to skip
-          notification entirely.
+
+      # --- Build configuration ----------------------------------------------
+      build_output_path:
+        description: 'Directory containing generated RTL to package.'
+        required: false
+        type: string
+        default: generated_sv_dir
+
+      rtl_target_override:
+        description: "Optional make target override (e.g. rtl or lazyrtl). Leave empty to use the repo's own cd.config."
         required: false
         type: string
         default: ''
+
+      playground_repo:
+        description: 'Shared "playground" toolchain repo. Forwarded to setup-toolchain.'
+        required: false
+        type: string
+        default: ''
+
+      # --- Committing generated output back into the repo -------------------
       commit_generated_output:
         description: >
-          If true, additionally commit build_output_path directly into this repo
-          (on top of still publishing the Release tarball) so generated_sv_dir
-          stays up to date in the repo's own tree. Off by default -- opt in per
-          caller so this doesn't silently change behavior for repos that only
-          want the Release artifact.
+          If true, also commit build_output_path directly into this repo (in
+          addition to publishing the Release tarball). Off by default; opt in
+          per caller so this never silently changes behavior for repos that
+          only want the Release artifact.
         required: false
         type: boolean
         default: false
+
       push_branch:
         description: >
-          Branch to push the commit_generated_output commit to. Defaults to the
-          branch that triggered this run, which is correct for direct
-          workflow_dispatch callers (e.g. a manual cd.yml run on branch TEST).
-          Callers invoked via repository_dispatch (e.g. on-dependency-release.yml's
-          regenerate-rtl job) lose branch context entirely -- repository_dispatch
-          always runs against the repo's default branch regardless of which
-          branch actually released the dependency -- so those callers MUST pass
-          this explicitly (typically forwarded from the dispatch payload) rather
-          than relying on the default.
+          Branch to push the commit_generated_output commit to. Defaults to
+          the branch that triggered this run — correct for a direct
+          workflow_dispatch call.
+          Required override: repository_dispatch-triggered callers (e.g.
+          on-dependency-release.yml's regenerate-rtl job) have no branch
+          context of their own — repository_dispatch always runs against the
+          default branch regardless of which branch actually released — so
+          those callers must pass this explicitly, typically forwarded from
+          the dispatch payload.
         required: false
         type: string
         default: ${{ github.ref_name }}
-      playground_repo:
+
+      # --- Notifying a downstream super-repo ---------------------------------
+      notify_repo:
         description: >
-          The shared "playground" toolchain repo to check out as a sibling
-          directory. Forwarded straight through to setup-toolchain's
-          playground-repo input -- see that action for the default.
+          Optional org/repo to notify via repository_dispatch after a
+          successful release. Only fires when tag_name is also explicitly
+          set -- auto-generated tags (tag_name left blank) never notify, so
+          routine/frequent releases don't trigger a downstream submodule
+          bump. Leave empty to skip notification entirely.
         required: false
         type: string
         default: ''
+
     secrets:
-      CI_SUBMODULE_PAT0:
+      CI_SUBMODULE_PAT:
         required: false
       RELEASE_TOKEN:
         required: false
       SUPER_REPO_DISPATCH_TOKEN:
         required: false
+
 jobs:
   cd:
-    # No event_name guard here: this workflow's only trigger is `workflow_call`,
-    # so being invoked at all already means a caller explicitly wants a release.
-    # A guard like `github.event_name == 'workflow_dispatch'` would silently skip
-    # this job whenever the caller itself was triggered by something else (e.g.
-    # on-dependency-release.yml, triggered by repository_dispatch) -- github.event_name
-    # reflects the event that started the whole run, not the caller's own `uses:` call.
+    # No event_name guard: this workflow only ever runs via workflow_call, so
+    # being invoked at all already means a caller wants a release. A guard
+    # like `github.event_name == 'workflow_dispatch'` would wrongly skip this
+    # job whenever the caller was itself triggered another way (e.g.
+    # repository_dispatch via on-dependency-release.yml) — github.event_name
+    # reflects the event that started the whole run, not this `uses:` call.
     runs-on: ubuntu-latest
     environment: production
     concurrency: rtl-release-${{ github.event.repository.name }}
@@ -99,8 +115,8 @@ jobs:
       - name: Setup toolchain and resolve dependencies
         uses: shau-08/CICD/.github/actions/setup-toolchain@main
         with:
-          submodule-token: ${{ secrets.CI_SUBMODULE_PAT0 }}
-          playground-repo: ${{ inputs.playground_repo != '' && inputs.playground_repo || 'shau-08/playground-stub' }}
+          submodule-token: ${{ secrets.CI_SUBMODULE_PAT }}
+          playground-repo: ${{ inputs.playground_repo != '' && inputs.playground_repo || 'morphingmachines/playground' }}
 
       - name: Cache Mill compiled output
         uses: actions/cache@v4
@@ -109,6 +125,7 @@ jobs:
           key: mill-out-${{ runner.os }}-${{ github.event.repository.name }}-${{ hashFiles('dependencies/**/*.scala', 'build.sc', 'playground/**/*.scala', 'playground/build.sc') }}
           restore-keys: |
             mill-out-${{ runner.os }}-${{ github.event.repository.name }}-
+
       - name: Generate RTL
         env:
           JAVA_OPTS: "-Xmx4g -Xss8m"
@@ -118,6 +135,7 @@ jobs:
           else
             make rtl-dispatch
           fi
+
       - name: Resolve tag name
         id: tag
         run: |
@@ -125,27 +143,26 @@ jobs:
           if [ -n "${{ inputs.tag_name }}" ]; then
             echo "tag=${{ inputs.tag_name }}" >> "$GITHUB_OUTPUT"
           else
-            # Use the commit actually checked out (inputs.ref resolved), NOT
-            # $GITHUB_SHA -- for a repository_dispatch-triggered caller (e.g. the
-            # super-repo's bump-and-regenerate flow), GITHUB_SHA is frozen at
-            # whatever commit existed BEFORE the bump commit was pushed, which
-            # would silently mislabel the release with the wrong/old short SHA.
+            # Use the commit actually checked out (resolved inputs.ref), not
+            # $GITHUB_SHA. For a repository_dispatch-triggered caller,
+            # GITHUB_SHA is frozen at the commit before the bump was pushed,
+            # which would mislabel the release with the wrong short SHA.
             actual_sha=$(git rev-parse HEAD)
             tag="${{ github.event.repository.name }}-${{ github.ref_name }}-$(date +%Y%m%d)-${actual_sha::7}"
             echo "tag=${tag}" >> "$GITHUB_OUTPUT"
           fi
+
       - name: Commit generated output
         if: inputs.commit_generated_output == true
         run: |
           set -euo pipefail
           out="${{ inputs.build_output_path }}"
 
-          # generated_sv_dir/* is typically in .gitignore (it's a build output),
-          # but files already tracked there stay tracked regardless -- gitignore
-          # only blocks *new* untracked paths from `git add`. Plain `git add`
-          # would then silently skip any genuinely new filename that shows up in
-          # a future run while still updating the already-tracked ones. `-f`
-          # forces both new and existing files in, so nothing is dropped.
+          # build_output_path is typically gitignored, but files already
+          # tracked there stay tracked regardless — gitignore only blocks new
+          # untracked paths. Plain `git add` would then silently skip any
+          # genuinely new filename while still updating existing ones. `-f`
+          # forces both in, so nothing is dropped.
           git add -f "$out"
 
           if git diff --cached --quiet; then
@@ -155,11 +172,10 @@ jobs:
             git config user.email "ci-bot@users.noreply.github.com"
             git commit -m "chore: update generated RTL output ($out) for ${{ steps.tag.outputs.tag }}"
 
-            # Push to whichever branch this run is actually meant to represent --
-            # NOT the repo's default branch. See push_branch's description above
-            # for why this can't just be derived from local git state (HEAD is
-            # detached after checkout, and repository_dispatch-triggered callers
-            # have no branch context to derive from at all).
+            # Push to the branch this run represents, not the repo's default
+            # branch. See push_branch's description above: HEAD is detached
+            # after checkout, and repository_dispatch callers have no branch
+            # context to derive this from locally.
             git push origin "HEAD:${{ inputs.push_branch }}"
           fi
 
@@ -186,12 +202,17 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
 
       - name: Resolve actually-built commit SHA (for notify payload)
-        if: inputs.notify_repo != ''
+        if: inputs.notify_repo != '' && inputs.tag_name != ''
         id: built_sha
         run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Notify super-repo of this release
-        if: inputs.notify_repo != ''
+        # Only notify on a deliberate, explicitly-named release (e.g. RTL1p0),
+        # never on an auto-generated tag. Frequent day-to-day CD runs that
+        # leave tag_name blank get a Release like <repo>-<branch>-<date>-<sha>
+        # but must NOT trigger a downstream submodule bump -- only real,
+        # explicitly tagged releases should propagate to a super-repo.
+        if: inputs.notify_repo != '' && inputs.tag_name != ''
         env:
           GH_TOKEN: ${{ secrets.SUPER_REPO_DISPATCH_TOKEN }}
         run: |
