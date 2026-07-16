@@ -1,18 +1,21 @@
 name: Reusable CI Logic
+
+# Shared CI pipeline for all Chisel RTL repos: verifies a PR merges cleanly
+# with main, then runs the repo's tests and lint. Called via `uses:` from
+# each repo's own ci.yml.
+
 on:
   workflow_call:
     inputs:
       playground_repo:
-        description: >
-          The shared "playground" toolchain repo to check out as a sibling
-          directory. Forwarded straight through to setup-toolchain's
-          playground-repo input -- see that action for the default.
+        description: 'Shared "playground" toolchain repo. Forwarded to setup-toolchain.'
         required: false
         type: string
         default: ''
     secrets:
-      CI_SUBMODULE_PAT0:
+      CI_SUBMODULE_PAT:
         required: false
+
 jobs:
 
   check-mergeable:
@@ -24,6 +27,7 @@ jobs:
         with:
           fetch-depth: 0
           ref: ${{ github.event.pull_request.head.sha }}
+
       - name: Attempt merge with main
         run: |
           set -euo pipefail
@@ -51,12 +55,12 @@ jobs:
       - name: Setup toolchain and resolve dependencies
         uses: shau-08/CICD/.github/actions/setup-toolchain@main
         with:
-          submodule-token: ${{ secrets.CI_SUBMODULE_PAT0 }}
-          # Empty string and "unset" aren't the same thing to a composite
-          # action's `with:` block -- passing '' explicitly would override
-          # setup-toolchain's own default rather than falling back to it, so
-          # the fallback has to happen here rather than relying on that.
-          playground-repo: ${{ inputs.playground_repo != '' && inputs.playground_repo || 'shau-08/playground-stub' }}
+          submodule-token: ${{ secrets.CI_SUBMODULE_PAT }}
+          # Empty string and "unset" aren't the same to a composite action's
+          # `with:` block — passing '' explicitly overrides setup-toolchain's
+          # own default rather than falling back to it, so the fallback has
+          # to happen here.
+          playground-repo: ${{ inputs.playground_repo != '' && inputs.playground_repo || 'morphingmachines/playground' }}
 
       - name: Cache Mill compiled output
         uses: actions/cache@v4
@@ -79,12 +83,11 @@ jobs:
           else
             MILL_BIN=playground/mill
           fi
-          # Auto-detect this repo's top-level Mill project name from its own
-          # build.sc, rather than hardcoding it. Convention (matches every
-          # build.sc we've seen): the repo's own root module is the one
-          # object whose millSourcePath is exactly `os.pwd` -- every
-          # dependency module instead appends path segments after it
-          # (e.g. `os.pwd / "dependencies" / ...`), so this line
+          # Auto-detect this repo's top-level Mill project from its own
+          # build.sc rather than hardcoding it. Convention: the repo's own
+          # root module is the one object whose millSourcePath is exactly
+          # os.pwd — every dependency module instead appends path segments
+          # after it (e.g. os.pwd / "dependencies" / ...), which is what
           # distinguishes "this repo's own module" from everything else.
           PROJECT=$(awk '
             /^object[ \t]+[A-Za-z_][A-Za-z0-9_]*/ { name=$2 }
