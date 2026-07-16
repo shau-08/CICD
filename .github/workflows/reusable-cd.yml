@@ -61,6 +61,14 @@ on:
         required: false
         type: string
         default: ${{ github.ref_name }}
+      playground_repo:
+        description: >
+          The shared "playground" toolchain repo to check out as a sibling
+          directory. Forwarded straight through to setup-toolchain's
+          playground-repo input -- see that action for the default.
+        required: false
+        type: string
+        default: ''
     secrets:
       CI_SUBMODULE_PAT:
         required: false
@@ -92,6 +100,7 @@ jobs:
         uses: shau-08/CICD/.github/actions/setup-toolchain@main
         with:
           submodule-token: ${{ secrets.CI_SUBMODULE_PAT }}
+          playground-repo: ${{ inputs.playground_repo != '' && inputs.playground_repo || 'shau-08/playground-stub' }}
 
       - name: Cache Mill compiled output
         uses: actions/cache@v4
