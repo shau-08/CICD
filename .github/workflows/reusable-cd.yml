@@ -47,8 +47,22 @@ on:
         required: false
         type: boolean
         default: false
+      push_branch:
+        description: >
+          Branch to push the commit_generated_output commit to. Defaults to the
+          branch that triggered this run, which is correct for direct
+          workflow_dispatch callers (e.g. a manual cd.yml run on branch TEST).
+          Callers invoked via repository_dispatch (e.g. on-dependency-release.yml's
+          regenerate-rtl job) lose branch context entirely -- repository_dispatch
+          always runs against the repo's default branch regardless of which
+          branch actually released the dependency -- so those callers MUST pass
+          this explicitly (typically forwarded from the dispatch payload) rather
+          than relying on the default.
+        required: false
+        type: string
+        default: ${{ github.ref_name }}
     secrets:
-      CI_SSH_PRIVATE_KEY:
+      CI_SUBMODULE_PAT:
         required: false
       RELEASE_TOKEN:
         required: false
@@ -77,7 +91,7 @@ jobs:
       - name: Setup toolchain and resolve dependencies
         uses: shau-08/CICD/.github/actions/setup-toolchain@main
         with:
-          ssh-private-key: ${{ secrets.CI_SSH_PRIVATE_KEY }}
+          submodule-token: ${{ secrets.CI_SUBMODULE_PAT }}
 
       - name: Cache Mill compiled output
         uses: actions/cache@v4
@@ -132,14 +146,12 @@ jobs:
             git config user.email "ci-bot@users.noreply.github.com"
             git commit -m "chore: update generated RTL output ($out) for ${{ steps.tag.outputs.tag }}"
 
-            # Same dynamic default-branch detection used elsewhere in this repo's
-            # workflows (e.g. on-dependency-release.yml's bump-submodule job):
-            # this pushes to the receiving repo's actual default branch,
-            # regardless of which branch/ref triggered this run. See that
-            # workflow's comments for the known limitation this implies for
-            # non-default-branch triggers.
-            default_branch=$(git remote show origin | awk '/HEAD branch/ {print $NF}')
-            git push origin "HEAD:$default_branch"
+            # Push to whichever branch this run is actually meant to represent --
+            # NOT the repo's default branch. See push_branch's description above
+            # for why this can't just be derived from local git state (HEAD is
+            # detached after checkout, and repository_dispatch-triggered callers
+            # have no branch context to derive from at all).
+            git push origin "HEAD:${{ inputs.push_branch }}"
           fi
 
       - name: Package RTL
@@ -183,5 +195,6 @@ jobs:
             --arg repo "${{ github.repository }}" \
             --arg tag "${{ steps.tag.outputs.tag }}" \
             --arg sha "${{ steps.built_sha.outputs.sha }}" \
-            '{event_type: "dependency-released", client_payload: {repo: $repo, tag: $tag, sha: $sha}}' \
+            --arg branch "${{ github.ref_name }}" \
+            '{event_type: "dependency-released", client_payload: {repo: $repo, tag: $tag, sha: $sha, branch: $branch}}' \
             | gh api "repos/${{ inputs.notify_repo }}/dispatches" --input -
