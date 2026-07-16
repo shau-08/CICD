@@ -70,7 +70,7 @@ on:
         type: string
         default: ''
     secrets:
-      CI_SUBMODULE_PAT:
+      CI_SUBMODULE_PAT0:
         required: false
       RELEASE_TOKEN:
         required: false
@@ -99,7 +99,7 @@ jobs:
       - name: Setup toolchain and resolve dependencies
         uses: shau-08/CICD/.github/actions/setup-toolchain@main
         with:
-          submodule-token: ${{ secrets.CI_SUBMODULE_PAT }}
+          submodule-token: ${{ secrets.CI_SUBMODULE_PAT0 }}
           playground-repo: ${{ inputs.playground_repo != '' && inputs.playground_repo || 'shau-08/playground-stub' }}
 
       - name: Cache Mill compiled output
