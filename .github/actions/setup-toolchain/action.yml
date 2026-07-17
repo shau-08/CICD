@@ -54,6 +54,14 @@ runs:
   using: 'composite'
   steps:
 
+    - name: DEBUG - check if submodule-token actually arrived
+      shell: bash
+      run: |
+        echo "submodule-token length: ${#SUBMODULE_TOKEN}"
+        echo "submodule-token is empty: $([ -z \"$SUBMODULE_TOKEN\" ] && echo yes || echo no)"
+      env:
+        SUBMODULE_TOKEN: ${{ inputs.submodule-token }}
+
     - name: Configure git to use PAT for SSH-style submodule URLs
       if: inputs.submodule-token != ''
       shell: bash
