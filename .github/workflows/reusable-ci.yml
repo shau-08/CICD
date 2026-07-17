@@ -14,7 +14,7 @@ on:
         default: ''
     secrets:
       CI_SUBMODULE_PAT:
-        required: true
+        required: false
 
 jobs:
 
