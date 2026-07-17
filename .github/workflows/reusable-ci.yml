@@ -51,7 +51,11 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: false
-
+      - name: DEBUG - check secret at reusable-ci.yml level, before handoff
+        run: |
+          echo "CI_SUBMODULE_PAT length (seen by reusable-ci.yml): ${#TOKEN}"
+        env:
+          TOKEN: ${{ secrets.CI_SUBMODULE_PAT }}
       - name: Setup toolchain and resolve dependencies
         uses: shau-08/CICD/.github/actions/setup-toolchain@main
         with:
