@@ -54,17 +54,13 @@ runs:
   using: 'composite'
   steps:
 
-    - name: DEBUG - check if submodule-token actually arrived
-      shell: bash
+    - name: DEBUG - check secret at reusable-ci.yml level, before handoff
       run: |
-        echo "submodule-token length: ${#SUBMODULE_TOKEN}"
-        if [ -z "$SUBMODULE_TOKEN" ]; then
-          echo "submodule-token is empty: yes"
-        else
-          echo "submodule-token is empty: no"
-        fi
-        env:
-        SUBMODULE_TOKEN: ${{ inputs.submodule-token }}
+        
+          echo "CI_SUBMODULE_PAT length (seen by reusable-ci.yml): ${#TOKEN}"
+        
+          env:
+        TOKEN: ${{ secrets.CI_SUBMODULE_PAT }}
 
     - name: Configure git to use PAT for SSH-style submodule URLs
       if: inputs.submodule-token != ''
