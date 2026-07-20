@@ -1,0 +1,102 @@
+name: Reusable CI Logic
+
+# Shared CI pipeline for all Chisel RTL repos: verifies a PR merges cleanly
+# with main, then runs the repo's tests and lint. Called via `uses:` from
+# each repo's own ci.yml.
+
+on:
+  workflow_call:
+    inputs:
+      playground_repo:
+        description: 'Shared "playground" toolchain repo. Forwarded to setup-toolchain.'
+        required: false
+        type: string
+        default: ''
+    secrets:
+      CI_SUBMODULE_PAT:
+        required: true
+
+jobs:
+
+  check-mergeable:
+    if: github.event_name == 'pull_request' && github.event.pull_request.base.ref == 'main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout PR head (full history needed to attempt a real merge)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Attempt merge with main
+        run: |
+          set -euo pipefail
+          git config user.email "ci-mergeable-check@local"
+          git config user.name "CI Mergeable Check"
+          git fetch origin main
+          if git merge --no-commit --no-ff origin/main; then
+            echo "PR merges cleanly with main."
+            git merge --abort 2>/dev/null || true
+          else
+            echo "::error::This PR has merge conflicts with main and cannot be merged as-is. Rebase or merge main into your branch to resolve."
+            git merge --abort 2>/dev/null || true
+            exit 1
+          fi
+
+  ci:
+    if: github.event_name != 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout caller repo
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+
+      - name: Setup toolchain and resolve dependencies
+        uses: shau-08/CICD/.github/actions/setup-toolchain@main
+        with:
+          submodule-token: ${{ secrets.CI_SUBMODULE_PAT }}
+          # Empty string and "unset" aren't the same to a composite action's
+          # `with:` block — passing '' explicitly overrides setup-toolchain's
+          # own default rather than falling back to it, so the fallback has
+          # to happen here.
+          playground-repo: ${{ inputs.playground_repo != '' && inputs.playground_repo || 'morphingmachines/playground' }}
+
+      - name: Cache Mill compiled output
+        uses: actions/cache@v4
+        with:
+          path: out
+          key: mill-out-${{ runner.os }}-${{ github.event.repository.name }}-${{ hashFiles('dependencies/**/*.scala', 'build.sc', 'playground/**/*.scala', 'playground/build.sc') }}
+          restore-keys: |
+            mill-out-${{ runner.os }}-${{ github.event.repository.name }}-
+
+      - name: Run tests
+        env:
+          JAVA_OPTS: "-Xmx4g -Xss8m"
+        run: make test
+
+      - name: Lint
+        run: |
+          set -euo pipefail
+          if [ -f ./mill ]; then
+            MILL_BIN=./mill
+          else
+            MILL_BIN=playground/mill
+          fi
+          # Auto-detect this repo's top-level Mill project from its own
+          # build.sc rather than hardcoding it. Convention: the repo's own
+          # root module is the one object whose millSourcePath is exactly
+          # os.pwd — every dependency module instead appends path segments
+          # after it (e.g. os.pwd / "dependencies" / ...), which is what
+          # distinguishes "this repo's own module" from everything else.
+          PROJECT=$(awk '
+            /^object[ \t]+[A-Za-z_][A-Za-z0-9_]*/ { name=$2 }
+            /millSourcePath[ \t]*=[ \t]*os\.pwd[ \t]*$/ { print name; exit }
+          ' build.sc)
+          if [ -z "$PROJECT" ]; then
+            echo "ERROR: could not auto-detect top-level Mill project from build.sc" >&2
+            echo "(expected exactly one object with millSourcePath = os.pwd)" >&2
+            exit 1
+          fi
+          echo "Detected project: $PROJECT"
+          make -f playground/Makefile.include lint project="$PROJECT" MILL="$MILL_BIN"
