@@ -100,7 +100,7 @@ jobs:
     # job whenever the caller was itself triggered another way (e.g.
     # repository_dispatch via on-dependency-release.yml) — github.event_name
     # reflects the event that started the whole run, not this `uses:` call.
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     environment: production
     concurrency: rtl-release-${{ github.event.repository.name }}
     permissions:
