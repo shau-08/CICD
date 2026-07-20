@@ -123,11 +123,23 @@ runs:
         distribution: temurin
         java-version: '17'
 
+    # NOTE: ~/.cache/mill deliberately excluded from this cache. That
+    # directory holds Mill's own build-graph/fingerprint bookkeeping, which
+    # tracks what's "already compiled" globally -- but the actual compiled
+    # output (out/) is NOT cached, so it starts empty on every fresh runner.
+    # If Mill's restored fingerprint state claims a module is already built
+    # while this run's real out/ is empty, Mill can skip recompiling it,
+    # producing a ClassNotFoundException/NoSuchFileException later when
+    # something tries to runMain or .fix a class/path that was silently
+    # never actually produced this run. Confirmed on mmu, hitting both
+    # Lint (mill mmu.fix's semanticDbData) and Generate RTL (mmu's own
+    # module) independently -- same root cause both times.
+    # ~/.ivy2/cache and ~/.cache/coursier are pure downloaded dependency
+    # artifacts (not build state), so they're safe to reuse across runs.
     - name: Cache Mill dependencies
       uses: actions/cache@v4
       with:
         path: |
-          ~/.cache/mill
           ~/.ivy2/cache
           ~/.cache/coursier
         key: ${{ runner.os }}-mill-${{ hashFiles('build.sc') }}
