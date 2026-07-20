@@ -71,7 +71,7 @@ runs:
 
     - name: Make playground resolvable as a sibling directory (../playground)
       shell: bash
-      run: ln -s "$GITHUB_WORKSPACE/playground" "$(dirname "$GITHUB_WORKSPACE")/playground"
+      run: ln -sfn "$GITHUB_WORKSPACE/playground" "$(dirname "$GITHUB_WORKSPACE")/playground"
 
     - name: Warn early if SSH-auth submodules exist but no token was provided
       shell: bash
