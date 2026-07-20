@@ -178,28 +178,47 @@ runs:
         fi
         firtool --version
 
+    - name: Check for an existing verilator install on this runner
+      id: verilator-local
+      shell: bash
+      run: |
+        if [ -x "/opt/verilator-${{ inputs.verilator-version }}/bin/verilator" ]; then
+          echo "present=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "present=false" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Clear any stale/partial verilator directory before cache restore
+      # Only relevant when the local check above found nothing usable --
+      # avoids actions/cache's tar extraction colliding with leftover
+      # root-owned files from a previous direct (non-cached) build.
+      if: steps.verilator-local.outputs.present != 'true'
+      shell: bash
+      run: sudo rm -rf /opt/verilator-${{ inputs.verilator-version }}
+
     - name: Cache verilator build
+      if: steps.verilator-local.outputs.present != 'true'
       uses: actions/cache@v4
       id: verilator-cache
       with:
         path: /opt/verilator-${{ inputs.verilator-version }}
         key: verilator-${{ inputs.verilator-version }}-${{ runner.os }}
 
-    - name: Build verilator (exact pinned version, only runs on cache miss)
-      if: steps.verilator-cache.outputs.cache-hit != 'true'
+    - name: Build verilator (exact pinned version, only on a real miss)
+      if: steps.verilator-local.outputs.present != 'true' && steps.verilator-cache.outputs.cache-hit != 'true'
       shell: bash
       run: |
         set -euo pipefail
         sudo apt-get update -qq
         sudo apt-get install -y git help2man perl python3 make autoconf g++ flex bison \
           libfl2 libfl-dev zlib1g zlib1g-dev
+        rm -rf /tmp/verilator-src
         git clone --depth 1 --branch v${{ inputs.verilator-version }} https://github.com/verilator/verilator.git /tmp/verilator-src
         cd /tmp/verilator-src
         autoconf
         ./configure --prefix=/opt/verilator-${{ inputs.verilator-version }}
         make -j"$(nproc)"
         sudo make install
-
     - name: Add verilator to PATH
       shell: bash
       run: |
